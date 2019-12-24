@@ -4099,8 +4099,7 @@ bool SwiftASTContext::LoadLibraryUsingPaths(
     return false;
   }
 
-  if (ConstString::Equals(runtime->GetStandardLibraryBaseName(),
-                          ConstString(library_name))) {
+  if (library_name == runtime->GetStandardLibraryBaseName()) {
     // Never dlopen the standard library. Some binaries statically
     // link to the Swift standard library and dlopening it here will
     // cause ObjC runtime conflicts.  If you want to run Swift
@@ -4109,9 +4108,9 @@ bool SwiftASTContext::LoadLibraryUsingPaths(
     LOG_PRINTF(LIBLLDB_LOG_TYPES,
                "Skipping swift standard library \"%s\" - we don't hand load "
                "that one.",
-               runtime->GetStandardLibraryBaseName().AsCString());
+               runtime->GetStandardLibraryBaseName());
     return true;
-  }
+    }
 
   PlatformSP platform_sp(process.GetTarget().GetPlatform());
 

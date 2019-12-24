@@ -78,6 +78,4 @@ class TestSwiftDWARFImporterObjC(lldbtest.TestBase):
                                 num_children=0)
         self.expect("expr obj", substrs=["ObjCClass",
                                          "private_ivar", "42"])
-        # FIXME: Removing this makes the expression below fail!
-        self.expect("target var swiftChild")
         self.expect("expr swiftChild!.number", substrs=["42"])

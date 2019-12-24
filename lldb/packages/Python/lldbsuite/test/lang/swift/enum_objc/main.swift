@@ -14,3 +14,4 @@ func test()
 }
 
 _ = test()
+
