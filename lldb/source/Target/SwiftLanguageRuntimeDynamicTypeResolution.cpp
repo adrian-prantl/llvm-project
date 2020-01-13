@@ -831,35 +831,34 @@ bool SwiftLanguageRuntimeImpl::GetDynamicTypeAndAddress_Class(
     return false;
   address.SetRawAddress(class_metadata_ptr);
 
-  Log *log(GetLogIfAllCategoriesSet(LIBLLDB_LOG_TYPES));
-  auto &remote_ast = GetRemoteASTContext(scratch_ctx);
-  swift::remote::RemoteAddress instance_address(class_metadata_ptr);
-  auto metadata_address = remote_ast.getHeapMetadataForObject(instance_address);
-  if (!metadata_address) {
-    if (log) {
-      log->Printf("could not read heap metadata for object at %lu: %s\n",
-                  class_metadata_ptr,
-                  metadata_address.getFailure().render().c_str());
-    }
-
+  // Ask mirrors about the right type.
+  auto *reflection_ctx = GetReflectionContext();
+  if (!reflection_ctx)
     return false;
-  }
-
-  auto instance_type =
-      remote_ast.getTypeForRemoteTypeMetadata(metadata_address.getValue(),
-                                              /*skipArtificial=*/true);
-  if (!instance_type) {
-    if (log) {
-      log->Printf("could not get type metadata from address %" PRIu64 " : %s\n",
-                  metadata_address.getValue().getAddressData(),
-                  instance_type.getFailure().render().c_str());
-    }
+  auto metadata = reflection_ctx->readMetadataFromInstance(class_metadata_ptr);
+  auto tr = reflection_ctx->readTypeFromMetadata(*metadata);
+  if (!tr)
     return false;
-  }
 
-  // The read lock must have been acquired by the caller.
-  class_type_or_name.SetCompilerType(
-      {&scratch_ctx, instance_type.getValue().getPointer()});
+  std::string mangled;
+  swift::Demangle::Demangler dem;
+  swift::Demangle::NodePointer demangling = tr->getDemangling(dem);
+  if (!demangling)
+    return false;
+  mangled = swift::Demangle::mangleNode(demangling); 
+
+  Status error;
+
+  // FIXME: Use an API to retrieve the prefix instead of hardcoding it.
+  ConstString mangled_with_prefix("$s" + mangled);
+
+  SwiftASTContext *swift_ast_ctx = llvm::dyn_cast_or_null<SwiftASTContext>(
+      in_value.GetCompilerType().GetTypeSystem());
+
+  // TypeRef -> swift::Type conversion through type reconstruction.
+  auto resolved_type =
+      swift_ast_ctx->GetTypeFromMangledTypename(mangled_with_prefix, error);
+  class_type_or_name.SetCompilerType(resolved_type);
   return true;
 }
 
