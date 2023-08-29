@@ -3,7 +3,7 @@ set(LLVM_NO_RTTI 1)
 
 include(AddLLVM)
 
-if (LLDB_ENABLE_SWIFT_SUPPORT)
+if (LLDB_ENABLE_SWIFT_COMPILER)
   include(SwiftAddCustomCommandTarget)
 endif()
 ## END SWIFT
@@ -279,7 +279,7 @@ if(NOT LLDB_BUILT_STANDALONE)
 endif()
 
 # Copy the clang resource directory.
-if (LLDB_ENABLE_SWIFT_SUPPORT)
+if (LLDB_ENABLE_SWIFT_COMPILER)
 add_custom_command_target(
     copy-clang-resource-dir
     COMMAND "${CMAKE_COMMAND}" "-E" "copy_directory" "${CLANG_RESOURCE_PATH}" "${lib_dir}/lldb/clang/"

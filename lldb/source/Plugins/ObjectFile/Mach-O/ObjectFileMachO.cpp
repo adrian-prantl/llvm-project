@@ -53,7 +53,7 @@
 
 #include "ObjectFileMachO.h"
 #ifdef LLDB_ENABLE_SWIFT
-#include "swift/ABI/ObjectFile.h"
+#include "llvm/BinaryFormat/Swift.h"
 #include "Plugins/LanguageRuntime/Swift/SwiftLanguageRuntime.h"
 #endif //LLDB_ENABLE_SWIFT
 
@@ -6962,7 +6962,7 @@ bool ObjectFileMachO::SaveCore(const lldb::ProcessSP &process_sp,
 llvm::StringRef ObjectFileMachO::GetReflectionSectionIdentifier(
     swift::ReflectionSectionKind section) {
 #ifdef LLDB_ENABLE_SWIFT
-  swift::SwiftObjectFileFormatMachO file_format_mach_o;
+  llvm::binary::SwiftObjectFileFormatMachO file_format_mach_o;
   return file_format_mach_o.getSectionName(section);
 #else
   llvm_unreachable("Swift support disabled");

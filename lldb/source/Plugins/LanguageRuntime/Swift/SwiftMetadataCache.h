@@ -1,17 +1,18 @@
-
 #ifndef liblldb_TypeRefCacher_h_
 #define liblldb_TypeRefCacher_h_
 
-#include <mutex>
+#ifdef LLDB_HAVE_SWIFT_COMPILER
 
 #include "lldb/Core/DataFileCache.h"
 #include "lldb/Core/Module.h"
 
+#include "swift/RemoteInspection/ReflectionContext.h"
+#include "swift/Remote/ExternalTypeRefCache.h"
+
 #include "llvm/Support/DJB.h"
 #include "llvm/Support/OnDiskHashTable.h"
 
-#include "swift/RemoteInspection/ReflectionContext.h"
-#include "swift/Remote/ExternalTypeRefCache.h"
+#include <mutex>
 
 namespace lldb_private {
 
@@ -172,4 +173,5 @@ private:
   llvm::Optional<DataFileCache> m_data_file_cache;
 };
 } // namespace lldb_private
+#endif
 #endif

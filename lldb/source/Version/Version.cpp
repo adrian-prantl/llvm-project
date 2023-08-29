@@ -11,7 +11,7 @@
 #include "lldb/Version/Version.inc"
 #include "clang/Basic/Version.h"
 
-#ifdef LLDB_ENABLE_SWIFT
+#ifdef LLDB_ENABLE_SWIFT_COMPILER
 #include "swift/Basic/Version.h"
 #endif // LLDB_ENABLE_SWIFT
 
@@ -60,7 +60,7 @@ const char *lldb_private::GetVersion() {
       g_version_str += ")";
     }
 
-#ifdef LLDB_ENABLE_SWIFT
+#ifdef LLDB_ENABLE_SWIFT_COMPILER
     auto const swift_version = swift::version::getSwiftFullVersion();
     g_version_str += "\n" + swift_version;
 #else

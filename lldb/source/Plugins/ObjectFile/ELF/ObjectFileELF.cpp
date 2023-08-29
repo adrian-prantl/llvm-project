@@ -44,7 +44,7 @@
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/MipsABIFlags.h"
 
-#ifdef LLDB_ENABLE_SWIFT
+#ifdef LLDB_ENABLE_SWIFT_COMPILER
 #include "swift/ABI/ObjectFile.h"
 #endif //LLDB_ENABLE_SWIFT
 

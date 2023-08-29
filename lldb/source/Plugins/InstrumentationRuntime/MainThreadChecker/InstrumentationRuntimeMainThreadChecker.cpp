@@ -23,7 +23,7 @@
 #include "lldb/Target/Target.h"
 #include "lldb/Target/Thread.h"
 #include "lldb/Utility/RegularExpression.h"
-#ifdef LLDB_ENABLE_SWIFT
+#ifdef LLDB_ENABLE_SWIFT_COMPILER
 #include "Plugins/Process/Utility/HistoryThread.h"
 #include "Plugins/TypeSystem/Swift/SwiftASTContext.h"
 #include "swift/AST/ASTContext.h"
@@ -80,7 +80,7 @@ bool InstrumentationRuntimeMainThreadChecker::CheckIfRuntimeIsValid(
   return symbol != nullptr;
 }
 
-#ifdef LLDB_ENABLE_SWIFT
+#ifdef LLDB_ENABLE_SWIFT_COMPILER
 static std::string TranslateObjCNameToSwiftName(std::string className,
                                                 std::string selector,
                                                 StackFrameSP swiftFrame) {

@@ -10,6 +10,8 @@
 //
 //===----------------------------------------------------------------------===//
 
+#ifdef LLDB_ENABLE_SWIFT_COMPILER
+
 #include "SwiftASTContext.h"
 
 #include "swift/ClangImporter/ClangImporter.h"
@@ -285,3 +287,5 @@ CreateSwiftDWARFImporterDelegate(TypeSystemSwiftTypeRef &ts) {
 }
 
 } // namespace lldb_private
+
+#endif

@@ -10,6 +10,8 @@
 //
 //===----------------------------------------------------------------------===//
 
+#ifdef LLDB_ENABLE_SWIFT_COMPILER
+
 #include "Plugins/TypeSystem/Swift/SwiftASTContext.h"
 #include "Plugins/TypeSystem/Swift/StoringDiagnosticConsumer.h"
 #include "Plugins/ExpressionParser/Swift/SwiftPersistentExpressionState.h"
@@ -8471,3 +8473,5 @@ bool SwiftASTContext::GetCompileUnitImportsImpl(
   }
   return true;
 }
+
+#endif

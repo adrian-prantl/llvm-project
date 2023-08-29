@@ -73,7 +73,7 @@
 #include "lldb/Utility/State.h"
 #include "lldb/Utility/Timer.h"
 
-#ifdef LLDB_ENABLE_SWIFT
+#ifdef LLDB_ENABLE_SWIFT_COMPILER
 #include "swift/Basic/Version.h"
 #endif
 

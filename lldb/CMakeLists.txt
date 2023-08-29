@@ -19,6 +19,7 @@ include(GNUInstallDirs)
 
 # BEGIN SWIFT MOD
 option(LLDB_ENABLE_SWIFT_SUPPORT "Enable swift support" ON)
+option(LLDB_ENABLE_SWIFT_COMPILER "Enable full swift support" ON)
 # END SWIFT MOD
 
 if(LLDB_BUILT_STANDALONE)
@@ -37,7 +38,7 @@ include(LLDBConfig)
 include(AddLLDB)
 
 # BEGIN - Swift Mods
-if (LLDB_ENABLE_SWIFT_SUPPORT)
+if (LLDB_ENABLE_SWIFT_COMPILER)
   if(EXISTS "${LLVM_EXTERNAL_SWIFT_SOURCE_DIR}")
      list(APPEND CMAKE_MODULE_PATH
           "${LLVM_EXTERNAL_SWIFT_SOURCE_DIR}/cmake"
@@ -50,7 +51,7 @@ if (LLDB_ENABLE_SWIFT_SUPPORT)
 endif()
 
 # When we have the early SwiftSyntax build, we can include its parser.
-if (LLDB_ENABLE_SWIFT_SUPPORT)
+if (LLDB_ENABLE_SWIFT_COMPILER)
   if(SWIFT_PATH_TO_EARLYSWIFTSYNTAX_BUILD_DIR)
     set(SWIFT_PATH_TO_EARLYSWIFTSYNTAX_TARGETS
       ${SWIFT_PATH_TO_EARLYSWIFTSYNTAX_BUILD_DIR}/cmake/SwiftSyntaxTargets.cmake)
