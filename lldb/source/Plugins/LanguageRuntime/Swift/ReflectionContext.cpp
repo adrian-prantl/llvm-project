@@ -1,4 +1,4 @@
-//===-- ReflectionContext.cpp --------------------------------------------===//
+//===-- ReflectionContextEmbedded.cpp -------------------------------------===//
 //
 // This source file is part of the Swift.org open source project
 //
@@ -15,22 +15,30 @@
 #include "lldb/Utility/Log.h"
 #include "swift/Demangling/Demangle.h"
 
+#ifndef LLDB_HAVE_SWIFT_COMPILER
+#include "swift/SwiftRemoteMirror/SwiftRemoteMirror.h"
+#include <memory.h>
+#endif
+
 using namespace lldb;
 using namespace lldb_private;
+
+#ifdef LLDB_HAVE_SWIFT_COMPILER
 
 namespace {
 
 /// An implementation of the generic ReflectionContextInterface that
-/// is templatized on target pointer width and specialized to either
-/// 32-bit or 64-bit pointers, with and without ObjC interoperability.
+/// instantiates the Swift compiler's ReflectionContext template with target
+/// pointer width, either 32-bit or 64-bit pointers, and ObjC interoperability
+/// enabled or disabled.
 template <typename ReflectionContext>
-class TargetReflectionContext
+class ReflectionContextEmbedded
     : public SwiftLanguageRuntimeImpl::ReflectionContextInterface {
   ReflectionContext m_reflection_ctx;
   swift::reflection::TypeConverter m_type_converter;
 
 public:
-  TargetReflectionContext(
+  ReflectionContextEmbedded(
       std::shared_ptr<swift::reflection::MemoryReader> reader,
       SwiftMetadataCache *swift_metadata_cache)
       : m_reflection_ctx(reader, swift_metadata_cache),
@@ -225,28 +233,28 @@ namespace lldb_private {
 std::unique_ptr<SwiftLanguageRuntimeImpl::ReflectionContextInterface>
 SwiftLanguageRuntimeImpl::ReflectionContextInterface::CreateReflectionContext(
     uint8_t ptr_size, std::shared_ptr<swift::remote::MemoryReader> reader,
-    bool ObjCInterop, SwiftMetadataCache *swift_metadata_cache) {
+    bool objc_interop, SwiftMetadataCache *swift_metadata_cache) {
   using ReflectionContext32ObjCInterop =
-      TargetReflectionContext<swift::reflection::ReflectionContext<
+      ReflectionContextEmbedded<swift::reflection::ReflectionContext<
           swift::External<swift::WithObjCInterop<swift::RuntimeTarget<4>>>>>;
   using ReflectionContext32NoObjCInterop =
-      TargetReflectionContext<swift::reflection::ReflectionContext<
+      ReflectionContextEmbedded<swift::reflection::ReflectionContext<
           swift::External<swift::NoObjCInterop<swift::RuntimeTarget<4>>>>>;
   using ReflectionContext64ObjCInterop =
-      TargetReflectionContext<swift::reflection::ReflectionContext<
+      ReflectionContextEmbedded<swift::reflection::ReflectionContext<
           swift::External<swift::WithObjCInterop<swift::RuntimeTarget<8>>>>>;
   using ReflectionContext64NoObjCInterop =
-      TargetReflectionContext<swift::reflection::ReflectionContext<
+      ReflectionContextEmbedded<swift::reflection::ReflectionContext<
           swift::External<swift::NoObjCInterop<swift::RuntimeTarget<8>>>>>;
   if (ptr_size == 4) {
-    if (ObjCInterop)
+    if (objc_interop)
       return std::make_unique<ReflectionContext32ObjCInterop>(
           reader, swift_metadata_cache);
     return std::make_unique<ReflectionContext32NoObjCInterop>(
         reader, swift_metadata_cache);
   }
   if (ptr_size == 8) {
-    if (ObjCInterop)
+    if (objc_interop)
       return std::make_unique<ReflectionContext64ObjCInterop>(
           reader, swift_metadata_cache);
     return std::make_unique<ReflectionContext64NoObjCInterop>(
@@ -254,4 +262,204 @@ SwiftLanguageRuntimeImpl::ReflectionContextInterface::CreateReflectionContext(
   }
   return {};
 }
+}
+
+#else
+
+namespace {
+
+/// An implementation of the generic ReflectionContextInterface that
+/// uses the less capable C interface to link against the system libraries.
+class ReflectionContextSystem
+    : public SwiftLanguageRuntimeImpl::ReflectionContextInterface {
+  std::shared_ptr<swift::reflection::MemoryReader> m_reader;
+  SwiftReflectionContextRef m_reflection_ctx;
+  llvm::BumpPtrAllocator m_pool;
+
+public:
+  ReflectionContextSystem(
+      uint8_t ptr_size, std::shared_ptr<swift::reflection::MemoryReader> reader,
+      SwiftMetadataCache *swift_metadata_cache)
+      : m_reader(reader) {
+    assert(m_reader);
+
+    m_reflection_ctx = swift_reflection_createReflectionContext(
+        m_reader.get(), ptr_size,
+        [](void *reader_context, const void *bytes, void *context) {
+          free(const_cast<void*>(bytes));
+        },
+        [](void *reader, uint64_t address, uint64_t size,
+           void **outFreeContext) -> const void * {
+          uint8_t *dest = (uint8_t *)malloc(size);
+          if (static_cast<LLDBMemoryReader *>(reader)->readBytes(
+                  swift::reflection::RemoteAddress(address), dest, size))
+            return dest;
+          free(dest);
+          return nullptr;
+        },
+        [](void *reader, uint64_t address) -> uint64_t {
+          std::string s;
+          if (static_cast<LLDBMemoryReader *>(reader)->readString(
+                  swift::reflection::RemoteAddress(address), s))
+            return s.size();
+          return 0;
+        },
+        [](void *reader, const char *name, uint64_t name_length) -> uint64_t {
+          return static_cast<LLDBMemoryReader *>(reader)
+              ->getSymbolAddress(std::string(name, name_length))
+              .getAddressData();
+        });
+  }
+
+  ~ReflectionContextSystem() {
+    swift_reflection_destroyReflectionContext(m_reflection_ctx);
+  }
+  llvm::Optional<uint32_t> AddImage(
+      llvm::function_ref<std::pair<swift::remote::RemoteRef<void>, uint64_t>(
+          swift::ReflectionSectionKind)>
+          find_section,
+      llvm::SmallVector<llvm::StringRef, 1> likely_module_names) override {
+    return {};
+  }
+
+  llvm::Optional<uint32_t>
+  AddImage(swift::remote::RemoteAddress image_start,
+           llvm::SmallVector<llvm::StringRef, 1> likely_module_names) override {
+    return {};
+  }
+
+  llvm::Optional<uint32_t> ReadELF(
+      swift::remote::RemoteAddress ImageStart,
+      llvm::Optional<llvm::sys::MemoryBlock> FileBuffer,
+      llvm::SmallVector<llvm::StringRef, 1> likely_module_names = {}) override {
+    return {};
+  }
+
+  const swift::reflection::TypeRef *
+  GetTypeRefOrNull(StringRef mangled_type_name) override {
+    swift_typeref_t ctype_ref = swift_reflection_typeRefForMangledTypeName(
+        m_reflection_ctx, mangled_type_name.data(), mangled_type_name.size());
+    auto *type_ref = reinterpret_cast<swift::reflection::TypeRef *>(ctype_ref);
+    if (!type_ref)
+      LLDB_LOG(GetLog(LLDBLog::Types), "Could not find typeref for type: {0}",
+               mangled_type_name);
+    return type_ref;
+  }
+
+  virtual const swift::reflection::TypeRef *
+  GetTypeRefOrNull(swift::Demangle::Demangler &dem,
+                   swift::Demangle::NodePointer node) override {
+    auto mangling = swift::Demangle::mangleNode(node);
+    if (!mangling.isSuccess())
+      return nullptr;
+    std::string remangled = mangling.result();
+    return GetTypeRefOrNull(remangled);
+  }
+
+  const swift::reflection::TypeInfo *
+  GetClassInstanceTypeInfo(const swift::reflection::TypeRef *type_ref,
+                           swift::remote::TypeInfoProvider *provider) override {
+    if (!type_ref)
+      return nullptr;
+
+    swift_typeinfo_t info = swift_reflection_infoForTypeRef(
+        m_reflection_ctx, reinterpret_cast<swift_typeref_t>(type_ref));
+    switch (info.Kind) {
+    case SWIFT_STRUCT: {
+      const std::vector<swift::reflection::FieldInfo> fields;
+      return new (m_pool) swift::reflection::RecordTypeInfo(
+          info.Size, info.Alignment, info.Stride, 0, false,
+          swift::reflection::RecordKind::Struct, fields);
+    }
+    default:
+      LLDB_LOG(GetLog(LLDBLog::Types), "{0} is not implemented", info.Kind);
+      return nullptr;
+    }
+  }
+
+  const swift::reflection::TypeInfo *
+  GetTypeInfo(const swift::reflection::TypeRef *type_ref,
+              swift::remote::TypeInfoProvider *provider) override {
+    LLDB_LOG(GetLog(LLDBLog::Types), "{0} is not implemented", LLVM_PRETTY_FUNCTION);
+    return nullptr;
+  }
+
+  swift::reflection::MemoryReader &GetReader() override {
+    return *m_reader;
+  }
+
+  const swift::reflection::TypeRef *
+  LookupSuperclass(const swift::reflection::TypeRef *tr) override {
+    LLDB_LOG(GetLog(LLDBLog::Types), "{0} is not implemented", LLVM_PRETTY_FUNCTION);
+    return nullptr;
+  }
+
+  bool ForEachSuperClassType(
+      swift::remote::TypeInfoProvider *tip, lldb::addr_t pointer,
+      std::function<bool(SwiftLanguageRuntimeImpl::SuperClassType)> fn)
+      override {
+    LLDB_LOG(GetLog(LLDBLog::Types), "{0} is not implemented", LLVM_PRETTY_FUNCTION);
+    return false;
+  }
+
+  llvm::Optional<std::pair<const swift::reflection::TypeRef *,
+                           swift::reflection::RemoteAddress>>
+  ProjectExistentialAndUnwrapClass(
+      swift::reflection::RemoteAddress existential_address,
+      const swift::reflection::TypeRef &existential_tr) override {
+    LLDB_LOG(GetLog(LLDBLog::Types), "{0} is not implemented", LLVM_PRETTY_FUNCTION);
+    return {};
+  }
+
+  const swift::reflection::TypeRef *
+  ReadTypeFromMetadata(lldb::addr_t metadata_address,
+                       bool skip_artificial_subclasses) override {
+    LLDB_LOG(GetLog(LLDBLog::Types), "{0} is not implemented", LLVM_PRETTY_FUNCTION);
+    return nullptr;
+  }
+
+  const swift::reflection::TypeRef *
+  ReadTypeFromInstance(lldb::addr_t instance_address,
+                       bool skip_artificial_subclasses) override {
+    LLDB_LOG(GetLog(LLDBLog::Types), "{0} is not implemented", LLVM_PRETTY_FUNCTION);
+    return nullptr;
+  }
+
+  llvm::Optional<bool> IsValueInlinedInExistentialContainer(
+      swift::remote::RemoteAddress existential_address) override {
+    LLDB_LOG(GetLog(LLDBLog::Types), "{0} is not implemented", LLVM_PRETTY_FUNCTION);
+    return {};
+  }
+
+  const swift::reflection::TypeRef *ApplySubstitutions(
+      const swift::reflection::TypeRef *type_ref,
+      swift::reflection::GenericArgumentMap substitutions) override{
+    LLDB_LOG(GetLog(LLDBLog::Types), "{0} is not implemented", LLVM_PRETTY_FUNCTION);
+    return nullptr;
+  }
+
+  swift::remote::RemoteAbsolutePointer
+  StripSignedPointer(swift::remote::RemoteAbsolutePointer pointer) override {
+    // Not supported by API.
+    LLDB_LOG(GetLog(LLDBLog::Types), "{0} is not implemented", LLVM_PRETTY_FUNCTION);
+    return pointer;
+  }
+};
+
+} // namespace
+
+namespace lldb_private {
+std::unique_ptr<SwiftLanguageRuntimeImpl::ReflectionContextInterface>
+SwiftLanguageRuntimeImpl::ReflectionContextInterface::CreateReflectionContext(
+    uint8_t ptr_size, std::shared_ptr<swift::remote::MemoryReader> reader,
+    bool objc_interop, SwiftMetadataCache *swift_metadata_cache) {
+  // This parameter isn't supported by the interface.
+  if (!objc_interop)
+    return {};
+
+  return std::make_unique<ReflectionContextSystem>(ptr_size, reader,
+                                                   swift_metadata_cache);
+}
+
+#endif
 } // namespace lldb_private
