@@ -1,5 +1,5 @@
 set(SWIFT_LIBS lldbPluginExpressionParserSwift)
-if(NOT LLDB_ENABLE_SWIFT_SUPPORT)
+if(NOT LLDB_ENABLE_SWIFT_COMPILER)
   unset(SWIFT_LIBS)
 endif()
 

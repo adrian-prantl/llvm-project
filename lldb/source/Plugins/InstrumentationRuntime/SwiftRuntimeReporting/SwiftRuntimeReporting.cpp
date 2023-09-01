@@ -24,9 +24,9 @@
 #include "lldb/Target/Target.h"
 #include "lldb/Target/Thread.h"
 #include "lldb/Utility/RegularExpression.h"
-#include "swift/AST/ASTContext.h"
-#include "swift/AST/NameLookup.h"
-#include "swift/ClangImporter/ClangImporter.h"
+//#include "swift/AST/ASTContext.h"
+//#include "swift/AST/NameLookup.h"
+//#include "swift/ClangImporter/ClangImporter.h"
 
 using namespace lldb;
 using namespace lldb_private;

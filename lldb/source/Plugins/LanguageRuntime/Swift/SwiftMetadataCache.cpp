@@ -1,8 +1,9 @@
 #include "SwiftMetadataCache.h"
-
+#ifdef LLDB_ENABLE_SWIFT_COMPILER
 #include "lldb/Utility/DataEncoder.h"
 #include "lldb/Utility/LLDBLog.h"
 #include "lldb/Version/Version.h"
+#include "swift/RemoteInspection/ReflectionContext.h"
 #include "llvm/Support/BLAKE3.h"
 #include "llvm/Support/CachePruning.h"
 
@@ -267,3 +268,4 @@ std::string SwiftMetadataCache::getTyperefCacheFileNameForModule(
   auto hashed_result = llvm::toHex(blake3.final());
   return "typeref-" + hashed_result;
 }
+#endif

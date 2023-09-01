@@ -71,8 +71,9 @@
 #include <mutex>
 #include <optional>
 #include <sstream>
+#include "Plugins/TypeSystem/Swift/TypeSystemSwiftTypeRef.h"
 
-#ifdef LLDB_ENABLE_SWIFT
+#ifdef LLDB_ENABLE_SWIFT_COMPILER
 #include "Plugins/TypeSystem/Swift/SwiftASTContext.h"
 #include "Plugins/ExpressionParser/Swift/SwiftPersistentExpressionState.h"
 #endif // LLDB_ENABLE_SWIFT
@@ -1680,7 +1681,7 @@ void Target::ModulesDidLoad(ModuleList &module_list) {
     }
     // Notify all the ASTContext(s).
     auto notify_callback = [&](lldb::TypeSystemSP type_system) {
-#ifdef LLDB_ENABLE_SWIFT
+#ifdef LLDB_ENABLE_SWIFT_COMPILER
       auto *swift_scratch_ctx =
           llvm::dyn_cast_or_null<TypeSystemSwiftTypeRefForExpressions>(
               type_system.get());
@@ -2415,7 +2416,7 @@ Target::GetScratchTypeSystemForLanguage(lldb::LanguageType language,
   if (!type_system_or_err)
     return type_system_or_err.takeError();
 
-#ifdef LLDB_ENABLE_SWIFT
+#ifdef LLDB_ENABLE_SWIFT_COMPILER
   if (language == eLanguageTypeSwift) {
     if (auto *swift_scratch_ctx =
             llvm::dyn_cast_or_null<TypeSystemSwiftTypeRefForExpressions>(
@@ -2578,6 +2579,7 @@ Target::GetPersistentExpressionStateForLanguage(lldb::LanguageType language) {
 #ifdef LLDB_ENABLE_SWIFT
 SwiftPersistentExpressionState *
 Target::GetSwiftPersistentExpressionState(ExecutionContextScope &exe_scope) {
+#ifdef LLDB_ENABLE_SWIFT_COMPILER
   Status error;
   auto maybe_swift_ast_context =
       GetSwiftScratchContext(error, exe_scope, true);
@@ -2585,6 +2587,8 @@ Target::GetSwiftPersistentExpressionState(ExecutionContextScope &exe_scope) {
     return nullptr;
   return (SwiftPersistentExpressionState *)
       maybe_swift_ast_context->get()->GetPersistentExpressionState();
+#endif
+  return nullptr;
 }
 #endif // LLDB_ENABLE_SWIFT
 
@@ -2727,8 +2731,8 @@ llvm::Optional<SwiftScratchContextReader> Target::GetSwiftScratchContext(
       return llvm::cast<TypeSystemSwiftTypeRefForExpressions>(cached->second.get());
     return nullptr;
   };
-
   auto maybe_create_fallback_context = [&]() {
+#ifdef LLDB_ENABLE_SWIFT_COMPILER
     ModuleLanguage key = {lldb_module, lldb::eLanguageTypeSwift};
     if (auto *cached_ts = get_cached_module_ts(lldb_module)) {
       auto *cached_ast_ctx =
@@ -2806,6 +2810,7 @@ llvm::Optional<SwiftScratchContextReader> Target::GetSwiftScratchContext(
     if (log)
       log->PutCString("created module-wide scratch context");
     return;
+#endif
   };
 
   llvm::Optional<SwiftScratchContextReader> reader;
@@ -2842,9 +2847,12 @@ llvm::Optional<SwiftScratchContextReader> Target::GetSwiftScratchContext(
     if (frame_sp && frame_sp.get()) {
       SymbolContext sc =
           frame_sp->GetSymbolContext(lldb::eSymbolContextEverything);
-      Status status = reader->get()->PerformCompileUnitImports(sc);
+#ifdef LLDB_ENABLE_SWIFT_COMPILER
+    
+     Status status = reader->get()->PerformCompileUnitImports(sc);
       if (status.Fail())
         Debugger::ReportError(status.AsCString(), GetDebugger().GetID());
+      #endif
     }
   }
   return reader;
@@ -2891,6 +2899,7 @@ SwiftScratchContextLock::SwiftScratchContextLock(
 
 void Target::DisplayFallbackSwiftContextErrors(
     SwiftASTContextForExpressions *swift_ast_ctx) {
+  #ifdef LLDB_ENABLE_SWIFT_COMPILER
   assert(m_use_scratch_typesystem_per_module);
   StreamSP errs = GetDebugger().GetAsyncErrorStream();
   if (!errs || m_did_display_scratch_fallback_warning ||
@@ -2907,6 +2916,7 @@ void Target::DisplayFallbackSwiftContextErrors(
       "a conflict is encountered.\n\n",
       swift_ast_ctx->GetFatalErrors().AsCString("unknown error"));
   errs->Flush();
+  #endif
 }
 
 bool Target::IsSwiftREPL() {

@@ -22,6 +22,7 @@
 #include "lldb/DataFormatters/StringPrinter.h"
 
 #include "Plugins/LanguageRuntime/Swift/SwiftLanguageRuntime.h"
+#include "Plugins/TypeSystem/Swift/TypeSystemSwiftTypeRef.h"
 #include "Plugins/TypeSystem/Clang/TypeSystemClang.h"
 #include "lldb/Symbol/CompileUnit.h"
 #include "lldb/Symbol/Function.h"
@@ -37,12 +38,12 @@
 #include <functional>
 #include <mutex>
 
-#include "swift/AST/ImportCache.h"
-#include "swift/AST/Module.h"
-#include "swift/AST/Type.h"
-#include "swift/AST/Types.h"
-#include "swift/Basic/InitializeSwiftModules.h"
-#include "swift/Demangling/ManglingMacros.h"
+//#include "swift/AST/ImportCache.h"
+//#include "swift/AST/Module.h"
+//#include "swift/AST/Type.h"
+//#include "swift/AST/Types.h"
+//#include "swift/Basic/InitializeSwiftModules.h"
+//#include "swift/Demangling/ManglingMacros.h"
 #include "llvm/Support/ConvertUTF.h"
 
 #include "Plugins/Language/ObjC/Cocoa.h"
@@ -83,8 +84,9 @@ void SwiftLanguage::Initialize() {
   lldb_private::formatters::NSArray_Additionals::GetAdditionalSynthetics()
       .emplace(g_NSArrayClass1,
                lldb_private::formatters::swift::ArraySyntheticFrontEndCreator);
-
+#ifdef LLDB_ENABLE_SWIFT_COMPILER
   initializeSwiftModules();
+#endif
 }
 
 void SwiftLanguage::Terminate() {
@@ -1199,6 +1201,7 @@ static void SplitDottedName(llvm::StringRef name,
 }
 
 std::unique_ptr<Language::TypeScavenger> SwiftLanguage::GetTypeScavenger() {
+#ifdef LLDB_ENABLE_SWIFT_COMPILER
   class SwiftTypeScavenger : public Language::TypeScavenger {
     friend std::unique_ptr<Language::TypeScavenger>
     SwiftLanguage::GetTypeScavenger();
@@ -1448,6 +1451,8 @@ std::unique_ptr<Language::TypeScavenger> SwiftLanguage::GetTypeScavenger() {
   };
 
   return std::unique_ptr<TypeScavenger>(new SwiftTypeScavenger());
+#endif
+  return nullptr;
 }
 
 const char *SwiftLanguage::GetLanguageSpecificTypeLookupHelp() {
@@ -1550,7 +1555,7 @@ LazyBool SwiftLanguage::IsLogicalTrue(ValueObject &valobj, Status &error) {
   static ConstString g_value("_value");
 
   Scalar scalar_value;
-
+#ifdef LLDB_ENABLE_SWIFT_COMPILER
   auto swift_ty = GetCanonicalSwiftType(valobj.GetCompilerType());
   CompilerType valobj_type = ToCompilerType(swift_ty);
   Flags type_flags(valobj_type.GetTypeInfo());
@@ -1575,7 +1580,7 @@ LazyBool SwiftLanguage::IsLogicalTrue(ValueObject &valobj, Status &error) {
       }
     }
   }
-
+#endif
   error.SetErrorString("not a Swift boolean type");
   return eLazyBoolNo;
 }

@@ -6960,9 +6960,9 @@ bool ObjectFileMachO::SaveCore(const lldb::ProcessSP &process_sp,
 }
 
 llvm::StringRef ObjectFileMachO::GetReflectionSectionIdentifier(
-    swift::ReflectionSectionKind section) {
+    llvm::binaryformat::Swift5ReflectionSectionKind section) {
 #ifdef LLDB_ENABLE_SWIFT
-  llvm::binary::SwiftObjectFileFormatMachO file_format_mach_o;
+  SwiftObjectFileFormatMachO file_format_mach_o;
   return file_format_mach_o.getSectionName(section);
 #else
   llvm_unreachable("Swift support disabled");
@@ -6971,7 +6971,7 @@ llvm::StringRef ObjectFileMachO::GetReflectionSectionIdentifier(
 
 #ifdef LLDB_ENABLE_SWIFT
 bool ObjectFileMachO::CanContainSwiftReflectionData(const Section &section) {
-  swift::SwiftObjectFileFormatMachO file_format;
+  SwiftObjectFileFormatMachO file_format;
   return file_format.sectionContainsReflectionData(
       section.GetName().GetStringRef());
 }

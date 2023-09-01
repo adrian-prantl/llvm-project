@@ -398,8 +398,8 @@ private:
   /// section with that name.
   std::shared_ptr<ObjectFileELF> GetGnuDebugDataObjectFile();
 
-  llvm::StringRef
-  GetReflectionSectionIdentifier(swift::ReflectionSectionKind section) override;
+  llvm::StringRef GetReflectionSectionIdentifier(
+      llvm::binaryformat::Swift5ReflectionSectionKind section) override;
 
 #ifdef LLDB_ENABLE_SWIFT
   bool

@@ -285,7 +285,8 @@ HashedCollectionConfig::StorageObjectAtAddress(
   ProcessSP process_sp = exe_ctx.GetProcessSP();
   if (!process_sp)
     return nullptr;
-  
+#ifdef LLDB_ENABLE_SWIFT_COMPILER
+
   // Create a ValueObject with a Swift AnyObject type referencing the
   // same address.
   Status error;
@@ -309,6 +310,7 @@ HashedCollectionConfig::StorageObjectAtAddress(
   return ValueObjectConstResult::Create(
     exe_scope, rawStorage_type, ConstString("swift"),
     buffer, exe_ctx.GetByteOrder(), exe_ctx.GetAddressByteSize());
+#endif
 }
 
 ValueObjectSP

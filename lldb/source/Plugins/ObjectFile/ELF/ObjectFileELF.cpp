@@ -44,8 +44,8 @@
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/MipsABIFlags.h"
 
-#ifdef LLDB_ENABLE_SWIFT_COMPILER
-#include "swift/ABI/ObjectFile.h"
+#ifdef LLDB_ENABLE_SWIFT
+#include "llvm/BinaryFormat/Swift.h"
 #endif //LLDB_ENABLE_SWIFT
 
 #define CASE_AND_STREAM(s, def, width)                                         \
@@ -3459,9 +3459,9 @@ ObjectFileELF::MapFileDataWritable(const FileSpec &file, uint64_t Size,
 }
 
 llvm::StringRef ObjectFileELF::GetReflectionSectionIdentifier(
-    swift::ReflectionSectionKind section) {
+    llvm::binaryformat::Swift5ReflectionSectionKind section) {
 #ifdef LLDB_ENABLE_SWIFT
-  swift::SwiftObjectFileFormatELF file_format_elf;
+  SwiftObjectFileFormatELF file_format_elf;
   return file_format_elf.getSectionName(section);
 #else
   llvm_unreachable("Swift support disabled");
@@ -3470,7 +3470,7 @@ llvm::StringRef ObjectFileELF::GetReflectionSectionIdentifier(
 
 #ifdef LLDB_ENABLE_SWIFT
 bool ObjectFileELF::CanContainSwiftReflectionData(const Section &section) {
-  swift::SwiftObjectFileFormatELF file_format;
+  SwiftObjectFileFormatELF file_format;
   return file_format.sectionContainsReflectionData(
       section.GetName().GetStringRef());
 }

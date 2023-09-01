@@ -63,7 +63,9 @@ public:
   const TypeSystemSwiftTypeRef &GetTypeSystemSwiftTypeRef() const override {
     return *this;
   }
+#ifdef LLDB_ENABLE_SWIFT_COMPILER
   swift::DWARFImporterDelegate &GetDWARFImporterDelegate();
+#endif
   ClangNameImporter *GetNameImporter() const;
   llvm::Triple GetTriple() const;
   void SetTriple(const llvm::Triple triple) override;
@@ -433,9 +435,11 @@ protected:
   mutable bool m_swift_ast_context_initialized = false;
   mutable lldb::TypeSystemSP m_swift_ast_context_sp;
   mutable SwiftASTContext *m_swift_ast_context = nullptr;
+#ifdef LLDB_ENABLE_SWIFT_COMPILER
   mutable std::unique_ptr<swift::DWARFImporterDelegate>
       m_dwarf_importer_delegate_up;
   mutable std::unique_ptr<ClangNameImporter> m_name_importer_up;
+#endif
   std::unique_ptr<DWARFASTParser> m_dwarf_ast_parser_up;
 
   /// The APINotesManager responsible for each Clang module.
@@ -499,7 +503,9 @@ protected:
   ///        deterministic.
   /// Perform all the implicit imports for the current frame.
   mutable std::unique_ptr<SymbolContext> m_initial_symbol_context_up;
+  #ifdef LLDB_ENABLE_SWIFT_COMPILER
   std::unique_ptr<SwiftPersistentExpressionState> m_persistent_state_up;
+  #endif
 };
 
 swift::DWARFImporterDelegate *

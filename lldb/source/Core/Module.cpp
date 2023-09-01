@@ -56,7 +56,7 @@
 #include "Plugins/Language/ObjC/ObjCLanguage.h"
 
 #ifdef LLDB_ENABLE_SWIFT
-#include "Plugins/TypeSystem/Swift/SwiftASTContext.h"
+//#include "Plugins/TypeSystem/Swift/SwiftASTContext.h"
 #include "Plugins/LanguageRuntime/Swift/SwiftLanguageRuntime.h"
 #endif // LLDB_ENABLE_SWIFT
 
@@ -1211,6 +1211,7 @@ static llvm::VersionTuple GetAdjustedVersion(llvm::VersionTuple version) {
 
 void Module::ReportWarningToolchainMismatch(
     CompileUnit &comp_unit, llvm::Optional<lldb::user_id_t> debugger_id) {
+#ifdef LLDB_ENABLE_SWIFT_COMPILER
   if (SymbolFile *sym_file = GetSymbolFile()) {
     llvm::VersionTuple sym_file_version =
         GetAdjustedVersion(sym_file->GetProducerVersion(comp_unit));
@@ -1227,6 +1228,7 @@ void Module::ReportWarningToolchainMismatch(
       Debugger::ReportWarning(str, debugger_id, &m_toolchain_mismatch_warning);
     }
   }
+#endif
 }
 
 bool Module::IsSwiftCxxInteropEnabled() {

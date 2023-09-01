@@ -26,8 +26,8 @@ bool UnsafeTypeSummaryProvider(ValueObject &valobj, Stream &stream,
 SyntheticChildrenFrontEnd *
 UnsafeTypeSyntheticFrontEndCreator(CXXSyntheticChildren *, lldb::ValueObjectSP);
 
-}; // namespace swift
-}; // namespace formatters
-}; // namespace lldb_private
+} // namespace swift
+} // namespace formatters
+} // namespace lldb_private
 
 #endif

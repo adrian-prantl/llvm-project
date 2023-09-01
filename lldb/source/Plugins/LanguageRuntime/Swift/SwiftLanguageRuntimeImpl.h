@@ -27,6 +27,7 @@ class TypeRef;
 namespace lldb_private {
 class Process;
 class LLDBTypeInfoProvider;
+class SwiftMetadataCache;
 
 /// A full LLDB language runtime backed by the Swift runtime library
 /// in the process.
@@ -167,7 +168,7 @@ public:
 
   CompilerType GetConcreteType(ExecutionContextScope *exe_scope,
                                ConstString abstract_type_name);
-
+#ifdef LLDB_ENABLE_SWIFT_COMPILER
   /// Retrieve the remote AST context for the given Swift AST context.
   swift::remoteAST::RemoteASTContext &
   GetRemoteASTContext(SwiftASTContext &swift_ast_ctx);
@@ -176,7 +177,7 @@ public:
   /// Note that a RemoteASTContext must be destroyed before its associated
   /// swift::ASTContext is destroyed.
   void ReleaseAssociatedRemoteASTContext(swift::ASTContext *ctx);
-
+#endif
   void AddToLibraryNegativeCache(llvm::StringRef library_name);
   bool IsInLibraryNegativeCache(llvm::StringRef library_name);
   void WillStartExecutingUserExpression(bool runs_in_playground_or_repl);
@@ -399,7 +400,7 @@ protected:
   std::mutex m_negative_cache_mutex;
 
   std::shared_ptr<LLDBMemoryReader> m_memory_reader_sp;
-
+#ifdef LLDB_HAVE_SWIFT_COMPILER
   llvm::DenseMap<std::pair<swift::ASTContext *, lldb::addr_t>,
                  SwiftLanguageRuntime::MetadataPromiseSP>
       m_promises_map;
@@ -407,7 +408,7 @@ protected:
   llvm::DenseMap<swift::ASTContext *,
                  std::unique_ptr<swift::remoteAST::RemoteASTContext>>
       m_remote_ast_contexts;
-
+#endif
   /// Uses ConstStrings as keys to avoid storing the strings twice.
   llvm::DenseMap<const char *, lldb::SyntheticChildrenSP>
       m_bridged_synthetics_map;
@@ -469,9 +470,9 @@ private:
 
   /// Mutex guarding accesses to the reflection context.
   std::recursive_mutex m_reflection_ctx_mutex;
-
+#ifdef LLDB_HAVE_SWIFT_COMPILER
   SwiftMetadataCache m_swift_metadata_cache;
-
+#endif
   /// Record modules added through ModulesDidLoad, which are to be
   /// added to the reflection context once it's being initialized.
   ModuleList m_modules_to_add;

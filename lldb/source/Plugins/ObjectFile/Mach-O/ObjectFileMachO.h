@@ -220,8 +220,8 @@ protected:
 
   bool SectionIsLoadable(const lldb_private::Section *section);
 
-  llvm::StringRef
-  GetReflectionSectionIdentifier(swift::ReflectionSectionKind section) override;
+  llvm::StringRef GetReflectionSectionIdentifier(
+      llvm::binaryformat::Swift5ReflectionSectionKind section) override;
 
 #ifdef LLDB_ENABLE_SWIFT
   bool

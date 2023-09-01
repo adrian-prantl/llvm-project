@@ -19,8 +19,8 @@
 #include "DWARFDefines.h"
 #include "SymbolFileDWARF.h"
 
-#include "swift/AST/ASTContext.h"
-#include "swift/AST/Decl.h"
+//#include "swift/AST/ASTContext.h"
+//#include "swift/AST/Decl.h"
 #include "swift/Demangling/Demangle.h"
 
 #include "clang/AST/DeclObjC.h"

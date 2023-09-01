@@ -13,13 +13,13 @@
 #include "SwiftOptionSet.h"
 
 #include "Plugins/TypeSystem/Clang/TypeSystemClang.h"
-#include "Plugins/TypeSystem/Swift/SwiftASTContext.h"
+#include "Plugins/TypeSystem/Swift/TypeSystemSwiftTypeRef.h"
 #include "lldb/Core/ValueObject.h"
 #include "lldb/Symbol/CompilerType.h"
 #include "lldb/Utility/StreamString.h"
 
-#include "swift/AST/Decl.h"
-#include "swift/ClangImporter/ClangImporter.h"
+//#include "swift/AST/Decl.h"
+//#include "swift/ClangImporter/ClangImporter.h"
 #include "clang/AST/Decl.h"
 #include "llvm/ADT/StringRef.h"
 
@@ -98,6 +98,7 @@ void lldb_private::formatters::swift::SwiftOptionSetSummaryProvider::
     if (!enum_decl)
       return;
   }
+#ifdef LLDB_ENABLE_SWIFT_COMPILER  
   auto swift_ts = ts.dyn_cast_or_null<SwiftASTContext>();
   if (!swift_ts)
     return;
@@ -118,6 +119,7 @@ void lldb_private::formatters::swift::SwiftOptionSetSummaryProvider::
       m_cases->push_back({case_init_val, case_name});
     }
   }
+#endif
 }
 
 std::string lldb_private::formatters::swift::SwiftOptionSetSummaryProvider::

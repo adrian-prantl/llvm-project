@@ -221,7 +221,7 @@ InstrumentationRuntimeMainThreadChecker::RetrieveReportData(
     trace->AddIntegerItem(PC);
   }
 
-#ifdef LLDB_ENABLE_SWIFT
+#ifdef LLDB_ENABLE_SWIFT_COMPILER
   if (responsible_frame) {
     if (responsible_frame->GetLanguage() == eLanguageTypeSwift) {
       std::string swiftApiName =

@@ -1438,7 +1438,7 @@ ObjectFile::Type ObjectFilePECOFF::CalculateType() {
 ObjectFile::Strata ObjectFilePECOFF::CalculateStrata() { return eStrataUser; }
 
 llvm::StringRef ObjectFilePECOFF::GetReflectionSectionIdentifier(
-    swift::ReflectionSectionKind section) {
+    llvm::binaryformat::Swift5ReflectionSectionKind section) {
 #ifdef LLDB_ENABLE_SWIFT
   SwiftObjectFileFormatCOFF file_format_coff;
   return file_format_coff.getSectionName(section);

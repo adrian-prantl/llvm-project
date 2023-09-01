@@ -10,6 +10,8 @@
 //
 //===----------------------------------------------------------------------===//
 
+#ifdef LLDB_ENABLE_SWIFT_COMPILER
+
 #include "SwiftLanguageRuntimeImpl.h"
 #include "lldb/Symbol/VariableList.h"
 #include "lldb/Utility/LLDBLog.h"
@@ -542,3 +544,4 @@ SwiftLanguageRuntimeImpl::GetPromiseForTypeNameAndFrame(const char *type_name,
 }
 
 } // namespace lldb_private
+#endif

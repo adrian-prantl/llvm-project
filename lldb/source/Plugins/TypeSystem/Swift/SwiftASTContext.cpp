@@ -200,10 +200,6 @@ CompilerType lldb_private::ToCompilerType(swift::Type qual_type) {
   return {ast_ctx->weak_from_this(), qual_type.getPointer()};
 }
 
-TypePayloadSwift::TypePayloadSwift(bool is_fixed_value_buffer) {
-  SetIsFixedValueBuffer(is_fixed_value_buffer);
-}
-
 CompilerType SwiftASTContext::GetCompilerType(ConstString mangled_name) {
   return GetTypeSystemSwiftTypeRef().GetTypeFromMangledTypename(mangled_name);
 }

@@ -21,13 +21,10 @@
 #include "lldb/Utility/UUID.h"
 #include "lldb/lldb-private.h"
 #include "llvm/ADT/Optional.h"
+#include "llvm/BinaryFormat/Swift.h"
 #include "llvm/Support/Threading.h"
 #include "llvm/Support/VersionTuple.h"
 
-namespace swift {
-class SwiftObjectFileFormat;
-enum ReflectionSectionKind : uint8_t;
-}
 namespace lldb_private {
 
 class ObjectFileJITDelegate {
@@ -713,8 +710,8 @@ public:
   /// Creates a plugin-specific call frame info
   virtual std::unique_ptr<CallFrameInfo> CreateCallFrameInfo();
 
-  virtual llvm::StringRef
-  GetReflectionSectionIdentifier(swift::ReflectionSectionKind section);
+  virtual llvm::StringRef GetReflectionSectionIdentifier(
+      llvm::binaryformat::Swift5ReflectionSectionKind section);
 
 #ifdef LLDB_ENABLE_SWIFT
   virtual bool CanContainSwiftReflectionData(const Section &section) {

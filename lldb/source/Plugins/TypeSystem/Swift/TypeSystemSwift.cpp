@@ -11,6 +11,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "Plugins/TypeSystem/Swift/TypeSystemSwift.h"
+#include "Plugins/TypeSystem/Swift/TypeSystemSwiftTypeRef.h"
 
 #include "Plugins/ExpressionParser/Swift/SwiftPersistentExpressionState.h"
 #include "Plugins/LanguageRuntime/Swift/SwiftLanguageRuntime.h"
@@ -142,6 +143,10 @@ lldb::Format TypeSystemSwift::GetFormat(opaque_compiler_type_t type) {
     return eFormatAddressInfo;
 
   return eFormatBytes;
+}
+
+TypePayloadSwift::TypePayloadSwift(bool is_fixed_value_buffer) {
+  SetIsFixedValueBuffer(is_fixed_value_buffer);
 }
 
 namespace llvm {

@@ -263,8 +263,8 @@ protected:
                                           const section_header_t &sect);
   size_t GetSectionDataSize(lldb_private::Section *section) override;
 
-  llvm::StringRef
-  GetReflectionSectionIdentifier(swift::ReflectionSectionKind section) override;
+  llvm::StringRef GetReflectionSectionIdentifier(
+      llvm::binaryformat::Swift5ReflectionSectionKind section) override;
 
 #ifdef LLDB_ENABLE_SWIFT
   bool

@@ -43,10 +43,12 @@
 #include "lldb/Utility/OptionParsing.h"
 #include "lldb/Utility/Timer.h"
 
+#ifdef LLDB_ENABLE_SWIFT_COMPILER
 #include "swift/AST/ASTMangler.h"
+#endif
 #include "swift/Demangling/Demangle.h"
 #include "swift/RemoteInspection/ReflectionContext.h"
-#include "swift/RemoteAST/RemoteAST.h"
+//#include "swift/RemoteAST/RemoteAST.h"
 
 #include "clang/AST/ASTContext.h"
 #include "clang/AST/DeclCXX.h"
@@ -340,8 +342,9 @@ public:
     return false;
   }
 
+#ifdef LLDB_ENABLE_SWIFT_COMPILER
   void ReleaseAssociatedRemoteASTContext(swift::ASTContext *ctx) {}
-
+#endif
   CompilerType BindGenericTypeParameters(StackFrame &stack_frame,
                                          CompilerType base_type) {
     STUB_LOG();
@@ -424,17 +427,17 @@ static bool HasReflectionInfo(ObjectFile *obj_file) {
   };
 
   StringRef field_md = obj_file->GetReflectionSectionIdentifier(
-      swift::ReflectionSectionKind::fieldmd);
+      llvm::binaryformat::Swift5ReflectionSectionKind::fieldmd);
   StringRef assocty = obj_file->GetReflectionSectionIdentifier(
-      swift::ReflectionSectionKind::assocty);
+      llvm::binaryformat::Swift5ReflectionSectionKind::assocty);
   StringRef builtin = obj_file->GetReflectionSectionIdentifier(
-      swift::ReflectionSectionKind::builtin);
+      llvm::binaryformat::Swift5ReflectionSectionKind::builtin);
   StringRef capture = obj_file->GetReflectionSectionIdentifier(
-      swift::ReflectionSectionKind::capture);
+      llvm::binaryformat::Swift5ReflectionSectionKind::capture);
   StringRef typeref = obj_file->GetReflectionSectionIdentifier(
-      swift::ReflectionSectionKind::typeref);
+      llvm::binaryformat::Swift5ReflectionSectionKind::typeref);
   StringRef reflstr = obj_file->GetReflectionSectionIdentifier(
-      swift::ReflectionSectionKind::reflstr);
+      llvm::binaryformat::Swift5ReflectionSectionKind::reflstr);
 
   bool hasReflectionSection = false;
   hasReflectionSection |= findSectionInObject(field_md);
@@ -485,9 +488,12 @@ void SwiftLanguageRuntimeImpl::ProcessModulesToAdd() {
 
 SwiftMetadataCache *
 SwiftLanguageRuntimeImpl::GetSwiftMetadataCache() {
+#ifdef LLDB_ENABLE_SWIFT_COMPILER
   if (!m_swift_metadata_cache.is_enabled())
     return {};
   return &m_swift_metadata_cache;
+#endif
+  return nullptr;
 }
 
 void SwiftLanguageRuntimeImpl::SetupReflection() {
@@ -623,18 +629,18 @@ void SwiftLanguageRuntime::ModulesDidLoad(const ModuleList &module_list) {
   }
 }
 
-static std::unique_ptr<swift::SwiftObjectFileFormat>
+static std::unique_ptr<SwiftObjectFileFormat>
 GetObjectFileFormat(llvm::Triple::ObjectFormatType obj_format_type) {
-  std::unique_ptr<swift::SwiftObjectFileFormat> obj_file_format;
+  std::unique_ptr<SwiftObjectFileFormat> obj_file_format;
   switch (obj_format_type) {
   case llvm::Triple::MachO:
-    obj_file_format = std::make_unique<swift::SwiftObjectFileFormatMachO>();
+    obj_file_format = std::make_unique<SwiftObjectFileFormatMachO>();
     break;
   case llvm::Triple::ELF:
-    obj_file_format = std::make_unique<swift::SwiftObjectFileFormatELF>();
+    obj_file_format = std::make_unique<SwiftObjectFileFormatELF>();
     break;
   case llvm::Triple::COFF:
-    obj_file_format = std::make_unique<swift::SwiftObjectFileFormatCOFF>();
+    obj_file_format = std::make_unique<SwiftObjectFileFormatCOFF>();
     break;
   default:
     if (Log *log = GetLog(LLDBLog::Types))
@@ -674,7 +680,7 @@ bool SwiftLanguageRuntimeImpl::AddJitObjectFileToReflectionContext(
   auto reflection_info_id = m_reflection_ctx->AddImage(
       [&](swift::ReflectionSectionKind section_kind)
           -> std::pair<swift::remote::RemoteRef<void>, uint64_t> {
-        auto section_name = obj_file_format->getSectionName(section_kind);
+        auto section_name = obj_file_format->getSectionName((llvm::binaryformat::Swift5ReflectionSectionKind)section_kind);
         for (auto section : *obj_file.GetSectionList()) {
           JITSection *jit_section = llvm::dyn_cast<JITSection>(section.get());
           if (jit_section && section->GetName().AsCString() == section_name) {
@@ -724,7 +730,7 @@ SwiftLanguageRuntimeImpl::AddObjectFileToReflectionContext(
     if (!sym_obj_file)
       return false;
 
-    llvm::Optional<llvm::StringRef> maybe_segment_name =
+    auto maybe_segment_name =
         obj_file_format->getSymbolRichSegmentName();
     if (!maybe_segment_name)
       return false;
@@ -749,8 +755,8 @@ SwiftLanguageRuntimeImpl::AddObjectFileToReflectionContext(
     return section_iter != segment->GetChildren().end();
   }();
 
-  llvm::Optional<llvm::StringRef> maybe_segment_name;
-  llvm::Optional<llvm::StringRef> maybe_secondary_segment_name;
+  std::optional<llvm::StringRef> maybe_segment_name;
+  std::optional<llvm::StringRef> maybe_secondary_segment_name;
   ObjectFile *object_file;
   if (should_register_with_symbol_obj_file) {
     maybe_segment_name = obj_file_format->getSymbolRichSegmentName();
@@ -803,7 +809,7 @@ SwiftLanguageRuntimeImpl::AddObjectFileToReflectionContext(
     if (!segment)
       return {};
 
-    auto section_name = obj_file_format->getSectionName(section_kind);
+    auto section_name = obj_file_format->getSectionName((llvm::binaryformat::Swift5ReflectionSectionKind)section_kind);
     for (auto section : segment->GetChildren()) {
       // Iterate over the sections until we find the reflection section we
       // need.
@@ -836,6 +842,7 @@ SwiftLanguageRuntimeImpl::AddObjectFileToReflectionContext(
     return {};
   };
 
+  #ifdef LLDB_ENABLE_SWIFT_COMPILER
   return m_reflection_ctx->AddImage(
       [&](swift::ReflectionSectionKind section_kind)
           -> std::pair<swift::remote::RemoteRef<void>, uint64_t> {
@@ -845,8 +852,20 @@ SwiftLanguageRuntimeImpl::AddObjectFileToReflectionContext(
         return find_section_with_kind(maybe_secondary_segment, section_kind);
       },
       likely_module_names);
-}
-
+#else
+  {
+  auto &target = m_process.GetTarget();
+  auto *obj_file = module->GetObjectFile();
+  if (!obj_file)
+    return false;
+  Address start_address = obj_file->GetBaseAddress();
+  auto load_ptr = static_cast<uintptr_t>(start_address.GetLoadAddress(&target));
+  m_reflection_ctx->AddImage(swift::remote::RemoteAddress(load_ptr),
+                             likely_module_names);
+  }
+#endif
+};
+  
 bool SwiftLanguageRuntimeImpl::AddModuleToReflectionContext(
     const lldb::ModuleSP &module_sp) {
   // This function is called from within SetupReflection so it cannot
@@ -909,12 +928,12 @@ bool SwiftLanguageRuntimeImpl::AddModuleToReflectionContext(
     info_id = m_reflection_ctx->AddImage(swift::remote::RemoteAddress(load_ptr),
                                likely_module_names);
   }
-
+#ifdef LLDB_ENABLE_SWIFT_COMPILER
   if (info_id)
     if (auto *swift_metadata_cache = GetSwiftMetadataCache())
       swift_metadata_cache->registerModuleWithReflectionInfoID(module_sp,
                                                                *info_id);
-
+#endif
   return true;
 }
 
@@ -1210,7 +1229,7 @@ void SwiftLanguageRuntime::FindFunctionPointersInCall(
   // FIXME: when we can ask swift/llvm for the location of function
   // arguments, then we can do this for all the function pointer
   // arguments we find.
-
+#ifdef LLDB_ENABLE_SWIFT_COMPILER
   SymbolContext sc = frame.GetSymbolContext(eSymbolContextSymbol);
   if (sc.symbol) {
     Mangled mangled_name = sc.symbol->GetMangled();
@@ -1315,6 +1334,7 @@ void SwiftLanguageRuntime::FindFunctionPointersInCall(
       }
     }
   }
+  #endif
 }
 
 //------------------------------------------------------------------
@@ -1406,6 +1426,7 @@ ValueObjectSP SwiftLanguageRuntime::CalculateErrorValueObjectFromValue(
 ValueObjectSP
 SwiftLanguageRuntime::CalculateErrorValue(StackFrameSP frame_sp,
                                           ConstString variable_name) {
+  #ifdef LLDB_ENABLE_SWIFT_COMPILER
   ProcessSP process_sp(frame_sp->GetThread()->GetProcess());
   Status error;
   Target *target = frame_sp->CalculateTarget().get();
@@ -1457,10 +1478,12 @@ SwiftLanguageRuntime::CalculateErrorValue(StackFrameSP frame_sp,
   error_valobj_sp = error_valobj_sp->GetQualifiedRepresentationIfAvailable(
       lldb::eDynamicCanRunTarget, true);
   return error_valobj_sp;
+  #endif
 }
 
 void SwiftLanguageRuntime::RegisterGlobalError(Target &target, ConstString name,
                                                lldb::addr_t addr) {
+#ifdef LLDB_ENABLE_SWIFT_COMPILER
   auto type_system_or_err =
       target.GetScratchTypeSystemForLanguage(eLanguageTypeSwift);
   if (!type_system_or_err) {
@@ -1530,6 +1553,7 @@ void SwiftLanguageRuntime::RegisterGlobalError(Target &target, ConstString name,
       }
     }
   }
+#endif
 }
 
 lldb::BreakpointPreconditionSP
@@ -1761,6 +1785,7 @@ lldb::SyntheticChildrenSP
 SwiftLanguageRuntimeImpl::GetBridgedSyntheticChildProvider(
     ValueObject &valobj) {
   ConstString type_name = valobj.GetCompilerType().GetTypeName();
+#ifdef LLDB_ENABLE_SWIFT_COMPILER
 
   if (!type_name.IsEmpty()) {
     auto iter = m_bridged_synthetics_map.find(type_name.AsCString()),
@@ -1800,7 +1825,7 @@ SwiftLanguageRuntimeImpl::GetBridgedSyntheticChildProvider(
       }
     }
   }
-
+#endif
   return nullptr;
 }
 
@@ -2368,13 +2393,13 @@ lldb::addr_t SwiftLanguageRuntime::FixupAddress(lldb::addr_t addr,
                                                 Status &error) {
   FORWARD(FixupAddress, addr, type, error);
 }
-
+#ifdef LLDB_ENABLE_SWIFT_COMPILER
 SwiftLanguageRuntime::MetadataPromiseSP
 SwiftLanguageRuntime::GetMetadataPromise(lldb::addr_t addr,
                                          ValueObject &for_object) {
   FORWARD(GetMetadataPromise, addr, for_object);
 }
-
+#endif
 bool SwiftLanguageRuntime::IsStoredInlineInBuffer(CompilerType type) {
   FORWARD(IsStoredInlineInBuffer, type);
 }
@@ -2441,10 +2466,12 @@ bool SwiftLanguageRuntime::IsInLibraryNegativeCache(
   FORWARD(IsInLibraryNegativeCache, library_name);
 }
 
+#ifdef LLDB_ENABLE_SWIFT_COMPILER
 void SwiftLanguageRuntime::ReleaseAssociatedRemoteASTContext(
     swift::ASTContext *ctx) {
   FORWARD(ReleaseAssociatedRemoteASTContext, ctx);
 }
+#endif
 
 CompilerType
 SwiftLanguageRuntime::BindGenericTypeParameters(StackFrame &stack_frame,

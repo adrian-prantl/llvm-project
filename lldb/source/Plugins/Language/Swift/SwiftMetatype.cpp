@@ -12,12 +12,13 @@
 
 #include "SwiftMetatype.h"
 #include "Plugins/LanguageRuntime/Swift/SwiftLanguageRuntime.h"
+#include "Plugins/TypeSystem/Swift/TypeSystemSwiftTypeRef.h"
 #include "lldb/Core/Mangled.h"
 #include "lldb/Symbol/CompilerType.h"
 #include "lldb/Target/Process.h"
 
-#include "swift/AST/Type.h"
-#include "swift/AST/Types.h"
+//#include "swift/AST/Type.h"
+//#include "swift/AST/Types.h"
 
 using namespace lldb;
 using namespace lldb_private;
@@ -26,6 +27,7 @@ using namespace lldb_private::formatters::swift;
 
 bool lldb_private::formatters::swift::SwiftMetatype_SummaryProvider(
     ValueObject &valobj, Stream &stream, const TypeSummaryOptions &options) {
+#ifdef LLDB_ENABLE_SWIFT_COMPILER
   lldb::addr_t metadata_ptr = valobj.GetPointerValue();
   if (metadata_ptr == LLDB_INVALID_ADDRESS || metadata_ptr == 0) {
     CompilerType compiler_metatype_type(valobj.GetCompilerType());
@@ -51,5 +53,6 @@ bool lldb_private::formatters::swift::SwiftMetatype_SummaryProvider(
       return true;
     }
   }
+#endif
   return false;
 }

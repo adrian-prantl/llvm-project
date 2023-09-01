@@ -18,6 +18,7 @@
 #include "Plugins/ExpressionParser/Clang/ClangUtil.h"
 #include "Plugins/TypeSystem/Clang/TypeSystemClang.h"
 #include "Plugins/TypeSystem/Swift/SwiftDemangle.h"
+#include "Plugins/TypeSystem/Swift/TypeSystemSwiftTypeRef.h"
 #include "lldb/Core/ValueObjectMemory.h"
 #include "lldb/Symbol/Variable.h"
 #include "lldb/Symbol/VariableList.h"
@@ -28,10 +29,11 @@
 #include "lldb/Utility/Log.h"
 #include "lldb/Utility/Timer.h"
 #include "llvm/ADT/STLExtras.h"
-
+#ifdef LLDB_HAVE_SWIFT_COMPILER
 #include "swift/AST/ASTContext.h"
 #include "swift/AST/ASTMangler.h"
 #include "swift/AST/ASTWalker.h"
+#endif
 #include "swift/Demangling/Demangle.h"
 #include "swift/RemoteInspection/ReflectionContext.h"
 #include "swift/RemoteInspection/TypeRefBuilder.h"
@@ -43,6 +45,7 @@ using namespace lldb;
 using namespace lldb_private;
 
 namespace lldb_private {
+#ifdef LLDB_HAVE_SWIFT_COMPILER
 swift::Type GetSwiftType(CompilerType type) {
   auto ts = type.GetTypeSystem();
   if (auto tr = ts.dyn_cast_or_null<TypeSystemSwift>())
@@ -51,10 +54,11 @@ swift::Type GetSwiftType(CompilerType type) {
   return {};
 }
 
-swift::CanType GetCanonicalSwiftType(CompilerType type) {
+  swift::CanType GetCanonicalSwiftType(CompilerType type) {
   swift::Type swift_type = GetSwiftType(type);
   return swift_type ? swift_type->getCanonicalType() : swift::CanType();
 }
+#endif
 
 static lldb::addr_t
 MaskMaybeBridgedPointer(Process &process, lldb::addr_t addr,
@@ -500,18 +504,23 @@ llvm::Optional<uint64_t> SwiftLanguageRuntimeImpl::GetMemberVariableOffset(
   // Using the module context for RemoteAST is cheaper bit only safe
   // when there is no dynamic type resolution involved.
   // If this is already in the expression context, ask RemoteAST.
+#ifdef LLDB_ENABLE_SWIFT_COMPILER
   if (instance_type.GetTypeSystem().isa_and_nonnull<SwiftASTContext>())
     offset =
         GetMemberVariableOffsetRemoteAST(instance_type, instance, member_name);
+#endif
   if (!offset) {
     // Convert to a TypeRef-type, if necessary.
+#ifdef LLDB_ENABLE_SWIFT_COMPILER
     if (auto module_ctx =
             instance_type.GetTypeSystem().dyn_cast_or_null<SwiftASTContext>())
       instance_type =
           module_ctx->GetTypeRefType(instance_type.GetOpaqueQualType());
-
+#endif
     offset = GetMemberVariableOffsetRemoteMirrors(instance_type, instance,
-                                                  member_name, error);
+member_name, error);
+    #ifdef LLDB_ENABLE_SWIFT_COMPILER
+
 #ifndef NDEBUG
     if (ModuleList::GetGlobalModuleListProperties()
             .GetSwiftValidateTypeSystem()) {
@@ -530,6 +539,7 @@ llvm::Optional<uint64_t> SwiftLanguageRuntimeImpl::GetMemberVariableOffset(
         //      diverge");
       }
     }
+#endif
 #endif
   }
   if (offset) {
@@ -1575,6 +1585,7 @@ bool SwiftLanguageRuntimeImpl::GetDynamicTypeAndAddress_Class(
   LLDB_LOGF(log, "dynamic type of instance_ptr 0x%" PRIx64 " is %s",
             instance_ptr, class_type.GetMangledTypeName().GetCString());
   class_type_or_name.SetCompilerType(dynamic_type);
+#ifdef LLDB_ENABLE_SWIFT_COMPILER
 
 #ifndef NDEBUG
   if (ModuleList::GetGlobalModuleListProperties()
@@ -1587,10 +1598,12 @@ bool SwiftLanguageRuntimeImpl::GetDynamicTypeAndAddress_Class(
                    << "\n";
   }
 #endif
+  #endif
   return true;
 }
 
 bool SwiftLanguageRuntimeImpl::IsValidErrorValue(ValueObject &in_value) {
+  #ifdef LLDB_ENABLE_SWIFT_COMPILER
   CompilerType var_type = in_value.GetStaticValue()->GetCompilerType();
   SwiftASTContext::ProtocolInfo protocol_info;
   if (!SwiftASTContext::GetProtocolTypeInfo(var_type, protocol_info))
@@ -1651,7 +1664,7 @@ bool SwiftLanguageRuntimeImpl::IsValidErrorValue(ValueObject &in_value) {
         error.Fail())
       return false;
   }
-
+#endif
   return true;
 }
 
@@ -1731,6 +1744,7 @@ bool SwiftLanguageRuntimeImpl::GetDynamicTypeAndAddress_Protocol(
   swift::Demangle::NodePointer node = typeref->getDemangling(dem);
   class_type_or_name.SetCompilerType(ts.RemangleAsType(dem, node));
   address.SetRawAddress(out_address.getAddressData());
+#ifdef LLDB_ENABLE_SWIFT_COMPILER
 
 #ifndef NDEBUG
   if (ModuleList::GetGlobalModuleListProperties()
@@ -1751,6 +1765,7 @@ bool SwiftLanguageRuntimeImpl::GetDynamicTypeAndAddress_Protocol(
     }
   }
 #endif
+  #endif
   return true;
 }
 
@@ -1963,9 +1978,14 @@ SwiftLanguageRuntimeImpl::BindGenericTypeParameters(StackFrame &stack_frame,
           base_type.GetTypeSystem().dyn_cast_or_null<TypeSystemSwiftTypeRef>())
     return BindGenericTypeParameters(stack_frame, *ts,
                                      base_type.GetMangledTypeName());
+  #ifdef LLDB_ENABLE_SWIFT_COMPILER
+
   return BindGenericTypeParametersRemoteAST(stack_frame, base_type);
+  #endif
+  return {};
 }
 
+#ifdef LLDB_ENABLE_SWIFT_COMPILER
 bool SwiftLanguageRuntime::GetAbstractTypeName(StreamString &name,
                                                swift::Type swift_type) {
   auto *generic_type_param = swift_type->getAs<swift::GenericTypeParamType>();
@@ -1976,7 +1996,7 @@ bool SwiftLanguageRuntime::GetAbstractTypeName(StreamString &name,
               generic_type_param->getIndex());
   return true;
 }
-
+#endif
 bool SwiftLanguageRuntimeImpl::GetDynamicTypeAndAddress_Value(
     ValueObject &in_value, CompilerType &bound_type,
     lldb::DynamicValueType use_dynamic, TypeAndOrName &class_type_or_name,
@@ -2324,8 +2344,8 @@ bool SwiftLanguageRuntimeImpl::GetDynamicTypeAndAddress_ClangType(
 
 static bool IsIndirectEnumCase(ValueObject &valobj) {
   return (valobj.GetLanguageFlags() &
-          SwiftASTContext::LanguageFlags::eIsIndirectEnumCase) ==
-         SwiftASTContext::LanguageFlags::eIsIndirectEnumCase;
+          TypeSystemSwift::LanguageFlags::eIsIndirectEnumCase) ==
+         TypeSystemSwift::LanguageFlags::eIsIndirectEnumCase;
 }
 
 static bool CouldHaveDynamicValue(ValueObject &in_value) {
@@ -2691,6 +2711,7 @@ bool SwiftLanguageRuntime::CouldHaveDynamicValue(ValueObject &in_value) {
 CompilerType
 SwiftLanguageRuntimeImpl::GetConcreteType(ExecutionContextScope *exe_scope,
                                           ConstString abstract_type_name) {
+#ifdef LLDB_ENABLE_SWIFT_COMPILER
   if (!exe_scope)
     return CompilerType();
 
@@ -2704,6 +2725,524 @@ SwiftLanguageRuntimeImpl::GetConcreteType(ExecutionContextScope *exe_scope,
     return CompilerType();
 
   return promise_sp->FulfillTypePromise();
+#endif
+  return {};
 }
 
 } // namespace lldb_private
+
+namespace swift {
+  namespace reflection {
+    class DemanglingForTypeRef
+    : public TypeRefVisitor<DemanglingForTypeRef, Demangle::NodePointer> {
+  Demangle::Demangler &Dem;
+
+  /// Demangle a type and dive into the outermost Type node.
+  Demangle::NodePointer demangleAndUnwrapType(llvm::StringRef mangledName) {
+    auto node = Dem.demangleType(mangledName);
+    if (node && node->getKind() == Node::Kind::Type && node->getNumChildren())
+      node = node->getFirstChild();
+    return node;
+  }
+
+public:
+  DemanglingForTypeRef(Demangle::Demangler &Dem) : Dem(Dem) {}
+
+  Demangle::NodePointer visit(const TypeRef *typeRef) {
+    auto node = TypeRefVisitor<DemanglingForTypeRef,
+                                Demangle::NodePointer>::visit(typeRef);
+
+    // Wrap all nodes in a Type node, as consumers generally expect.
+    auto typeNode = Dem.createNode(Node::Kind::Type);
+    typeNode->addChild(node, Dem);
+    return typeNode;
+  }
+
+  Demangle::NodePointer visitBuiltinTypeRef(const BuiltinTypeRef *B) {
+    return demangleAndUnwrapType(B->getMangledName());
+  }
+
+  Demangle::NodePointer visitNominalTypeRef(const NominalTypeRef *N) {
+    auto node = demangleAndUnwrapType(N->getMangledName());
+    if (!node || node->getNumChildren() != 2)
+      return node;
+
+    auto parent = N->getParent();
+    if (!parent)
+      return node;
+
+    // Swap in the richer parent that is stored in the NominalTypeRef
+    // instead of what is encoded in the mangled name. The mangled name's
+    // context has been "unspecialized" by NodeBuilder.
+    auto parentNode = visit(parent);
+    if (!parentNode)
+      return node;
+    if (parentNode->getKind() == Node::Kind::Type &&
+        parentNode->getNumChildren())
+      parentNode = parentNode->getFirstChild();
+
+    auto contextualizedNode = Dem.createNode(node->getKind());
+    contextualizedNode->addChild(parentNode, Dem);
+    contextualizedNode->addChild(node->getChild(1), Dem);
+    return contextualizedNode;
+  }
+
+  Demangle::NodePointer
+  visitBoundGenericTypeRef(const BoundGenericTypeRef *BG) {
+    Node::Kind genericNodeKind;
+    if (BG->isStruct()) {
+      genericNodeKind = Node::Kind::BoundGenericStructure;
+    } else if (BG->isEnum()) {
+      genericNodeKind = Node::Kind::BoundGenericEnum;
+    } else if (BG->isClass()) {
+      genericNodeKind = Node::Kind::BoundGenericClass;
+    } else {
+      genericNodeKind = Node::Kind::BoundGenericOtherNominalType;
+    }
+    auto unspecializedType = Dem.demangleType(BG->getMangledName());
+
+    auto genericArgsList = Dem.createNode(Node::Kind::TypeList);
+    for (auto param : BG->getGenericParams())
+      genericArgsList->addChild(visit(param), Dem);
+
+    auto genericNode = Dem.createNode(genericNodeKind);
+    genericNode->addChild(unspecializedType, Dem);
+    genericNode->addChild(genericArgsList, Dem);
+
+    auto parent = BG->getParent();
+    if (!parent)
+      return genericNode;
+
+    auto parentNode = visit(parent);
+    if (!parentNode || !parentNode->hasChildren() ||
+        parentNode->getKind() != Node::Kind::Type ||
+        !unspecializedType->hasChildren())
+      return genericNode;
+
+    // Peel off the "Type" node.
+    parentNode = parentNode->getFirstChild();
+
+    auto nominalNode = unspecializedType->getFirstChild();
+
+    if (nominalNode->getNumChildren() != 2)
+      return genericNode;
+
+    // Save identifier for reinsertion later, we have to remove it
+    // so we can insert the parent node as the first child.
+    auto identifierNode = nominalNode->getLastChild();
+
+    // Remove all children.
+    nominalNode->removeChildAt(1);
+    nominalNode->removeChildAt(0);
+
+    // Add the parent we just visited back in, followed by the identifier.
+    nominalNode->addChild(parentNode, Dem);
+    nominalNode->addChild(identifierNode, Dem);
+
+    return genericNode;
+  }
+
+  Demangle::NodePointer visitTupleTypeRef(const TupleTypeRef *T) {
+    auto tuple = Dem.createNode(Node::Kind::Tuple);
+
+    auto Labels = T->getLabels();
+    for (auto LabelElement : llvm::zip(Labels, T->getElements())) {
+      auto tupleElt = Dem.createNode(Node::Kind::TupleElement);
+      auto Label = std::get<0>(LabelElement);
+      if (!Label.empty()) {
+        auto name = Dem.createNode(Node::Kind::TupleElementName, Label);
+        tupleElt->addChild(name, Dem);
+      }
+      tupleElt->addChild(visit(std::get<1>(LabelElement)), Dem);
+      tuple->addChild(tupleElt, Dem);
+    }
+    return tuple;
+  }
+
+  Demangle::NodePointer visitFunctionTypeRef(const FunctionTypeRef *F) {
+    Node::Kind kind;
+    switch (F->getFlags().getConvention()) {
+    case FunctionMetadataConvention::Swift:
+      kind = !F->getFlags().isEscaping() ? Node::Kind::NoEscapeFunctionType
+                                         : Node::Kind::FunctionType;
+      break;
+    case FunctionMetadataConvention::Block:
+      kind = Node::Kind::ObjCBlock;
+      break;
+    case FunctionMetadataConvention::Thin:
+      kind = Node::Kind::ThinFunctionType;
+      break;
+    case FunctionMetadataConvention::CFunctionPointer:
+      kind = Node::Kind::CFunctionPointer;
+      break;
+    }
+
+    llvm::SmallVector<std::pair<NodePointer, bool>, 8> inputs;
+    for (const auto &param : F->getParameters()) {
+      auto flags = param.getFlags();
+      auto input = visit(param.getType());
+
+      auto wrapInput = [&](Node::Kind kind) {
+        auto parent = Dem.createNode(kind);
+        parent->addChild(input, Dem);
+        input = parent;
+      };
+      if (flags.isNoDerivative()) {
+        wrapInput(Node::Kind::NoDerivative);
+      }
+      switch (flags.getValueOwnership()) {
+      case ValueOwnership::Default:
+        /* nothing */
+        break;
+      case ValueOwnership::InOut:
+        wrapInput(Node::Kind::InOut);
+        break;
+      case ValueOwnership::Shared:
+        wrapInput(Node::Kind::Shared);
+        break;
+      case ValueOwnership::Owned:
+        wrapInput(Node::Kind::Owned);
+        break;
+      }
+      if (flags.isIsolated()) {
+        wrapInput(Node::Kind::Isolated);
+      }
+
+      inputs.push_back({input, flags.isVariadic()});
+    }
+    NodePointer totalInput = nullptr;
+    // FIXME: this is copy&paste from Demangle.cpp
+    switch (inputs.size()) {
+    case 1: {
+      auto singleParam = inputs.front();
+
+      // If the sole unlabeled parameter has a non-tuple type, encode
+      // the parameter list as a single type.
+      if (!singleParam.second) {
+        auto singleType = singleParam.first;
+        if (singleType->getKind() == Node::Kind::Type)
+          singleType = singleType->getFirstChild();
+        if (singleType->getKind() != Node::Kind::Tuple) {
+          totalInput = singleParam.first;
+          break;
+        }
+      }
+
+      // Otherwise it requires a tuple wrapper.
+      SWIFT_FALLTHROUGH;
+    }
+
+    // This covers both none and multiple parameters.
+    default:
+      auto tuple = Dem.createNode(Node::Kind::Tuple);
+      for (auto &input : inputs) {
+        NodePointer eltType;
+        bool isVariadic;
+        std::tie(eltType, isVariadic) = input;
+
+        // Tuple element := variadic-marker label? type
+        auto tupleElt = Dem.createNode(Node::Kind::TupleElement);
+
+        if (isVariadic)
+          tupleElt->addChild(Dem.createNode(Node::Kind::VariadicMarker), Dem);
+
+        if (eltType->getKind() == Node::Kind::Type) {
+          tupleElt->addChild(eltType, Dem);
+        } else {
+          auto type = Dem.createNode(Node::Kind::Type);
+          type->addChild(eltType, Dem);
+          tupleElt->addChild(type, Dem);
+        }
+
+        tuple->addChild(tupleElt, Dem);
+      }
+      totalInput = tuple;
+      break;
+    }
+
+    NodePointer parameters = Dem.createNode(Node::Kind::ArgumentTuple);
+    NodePointer paramType = Dem.createNode(Node::Kind::Type);
+
+    paramType->addChild(totalInput, Dem);
+    parameters->addChild(paramType, Dem);
+
+    NodePointer resultTy = visit(F->getResult());
+    NodePointer result = Dem.createNode(Node::Kind::ReturnType);
+    result->addChild(resultTy, Dem);
+
+    auto funcNode = Dem.createNode(kind);
+    if (auto globalActor = F->getGlobalActor()) {
+      auto node = Dem.createNode(Node::Kind::GlobalActorFunctionType);
+      auto globalActorNode = visit(globalActor);
+      node->addChild(globalActorNode, Dem);
+      funcNode->addChild(node, Dem);
+    }
+
+    if (F->getFlags().isDifferentiable()) {
+      MangledDifferentiabilityKind mangledKind;
+      switch (F->getDifferentiabilityKind().Value) {
+#define CASE(X) case FunctionMetadataDifferentiabilityKind::X: \
+        mangledKind = MangledDifferentiabilityKind::X; break;
+
+      CASE(NonDifferentiable)
+      CASE(Forward)
+      CASE(Reverse)
+      CASE(Normal)
+      CASE(Linear)
+#undef CASE
+      }
+
+      funcNode->addChild(
+          Dem.createNode(
+            Node::Kind::DifferentiableFunctionType,
+            (Node::IndexType)mangledKind),
+          Dem);
+    }
+
+    if (F->getFlags().isThrowing())
+      funcNode->addChild(Dem.createNode(Node::Kind::ThrowsAnnotation), Dem);
+    if (F->getFlags().isSendable()) {
+      funcNode->addChild(
+          Dem.createNode(Node::Kind::ConcurrentFunctionType), Dem);
+    }
+    if (F->getFlags().isAsync())
+      funcNode->addChild(Dem.createNode(Node::Kind::AsyncAnnotation), Dem);
+    funcNode->addChild(parameters, Dem);
+    funcNode->addChild(result, Dem);
+    return funcNode;
+  }
+
+  Demangle::NodePointer
+  visitProtocolCompositionTypeRef(const ProtocolCompositionTypeRef *PC) {
+    auto type_list = Dem.createNode(Node::Kind::TypeList);
+    for (auto protocol : PC->getProtocols())
+      type_list->addChild(visit(protocol), Dem);
+
+    auto proto_list = Dem.createNode(Node::Kind::ProtocolList);
+    proto_list->addChild(type_list, Dem);
+
+    auto node = proto_list;
+    if (auto superclass = PC->getSuperclass()) {
+      node = Dem.createNode(Node::Kind::ProtocolListWithClass);
+      node->addChild(proto_list, Dem);
+      node->addChild(visit(superclass), Dem);
+    } else if (PC->hasExplicitAnyObject()) {
+      node = Dem.createNode(Node::Kind::ProtocolListWithAnyObject);
+      node->addChild(proto_list, Dem);
+    }
+    return node;
+  }
+
+  Demangle::NodePointer
+  visitConstrainedExistentialTypeRef(const ConstrainedExistentialTypeRef *CET) {
+    auto node = Dem.createNode(Node::Kind::ConstrainedExistential);
+    node->addChild(visit(CET->getBase()), Dem);
+    auto constraintList =
+        Dem.createNode(Node::Kind::ConstrainedExistentialRequirementList);
+    for (auto req : CET->getRequirements())
+      constraintList->addChild(visitTypeRefRequirement(req), Dem);
+    node->addChild(constraintList, Dem);
+    return node;
+  }
+
+  Demangle::NodePointer visitMetatypeTypeRef(const MetatypeTypeRef *M) {
+    auto node = Dem.createNode(Node::Kind::Metatype);
+    // FIXME: This is lossy. @objc_metatype is also abstract.
+    auto repr = Dem.createNode(Node::Kind::MetatypeRepresentation,
+                               M->wasAbstract() ? "@thick" : "@thin");
+    node->addChild(repr, Dem);
+    node->addChild(visit(M->getInstanceType()), Dem);
+    return node;
+  }
+
+  Demangle::NodePointer
+  visitExistentialMetatypeTypeRef(const ExistentialMetatypeTypeRef *EM) {
+    auto node = Dem.createNode(Node::Kind::Metatype);
+    node->addChild(visit(EM->getInstanceType()), Dem);
+    return node;
+  }
+
+  Demangle::NodePointer
+  visitGenericTypeParameterTypeRef(const GenericTypeParameterTypeRef *GTP) {
+    auto node = Dem.createNode(Node::Kind::DependentGenericParamType);
+    node->addChild(Dem.createNode(Node::Kind::Index, GTP->getDepth()), Dem);
+    node->addChild(Dem.createNode(Node::Kind::Index, GTP->getIndex()), Dem);
+    return node;
+  }
+
+  Demangle::NodePointer
+  visitDependentMemberTypeRef(const DependentMemberTypeRef *DM) {
+
+    auto node = Dem.createNode(Node::Kind::DependentMemberType);
+    auto Base = visit(DM->getBase());
+    node->addChild(Base, Dem);
+
+    auto MemberId = Dem.createNode(Node::Kind::Identifier, DM->getMember());
+
+    auto MangledProtocol = DM->getProtocol();
+    if (MangledProtocol.empty()) {
+      // If there's no protocol, add the Member as an Identifier node
+      node->addChild(MemberId, Dem);
+    } else {
+      // Otherwise, build up a DependentAssociatedTR node with
+      // the member Identifer and protocol
+      auto AssocTy = Dem.createNode(Node::Kind::DependentAssociatedTypeRef);
+      AssocTy->addChild(MemberId, Dem);
+      auto Proto = Dem.demangleType(MangledProtocol);
+      assert(Proto && "Failed to demangle");
+      assert(Proto->getKind() == Node::Kind::Type && "Protocol type is not a type?!");
+      AssocTy->addChild(Proto, Dem);
+      node->addChild(AssocTy, Dem);
+    }
+    return node;
+  }
+
+  Demangle::NodePointer visitForeignClassTypeRef(const ForeignClassTypeRef *F) {
+    return demangleAndUnwrapType(F->getName());
+  }
+
+  Demangle::NodePointer visitObjCClassTypeRef(const ObjCClassTypeRef *OC) {
+    auto module = Dem.createNode(Node::Kind::Module, MANGLING_MODULE_OBJC);
+    auto node = Dem.createNode(Node::Kind::Class);
+    node->addChild(module, Dem);
+    node->addChild(Dem.createNode(Node::Kind::Identifier, OC->getName()), Dem);
+    return node;
+  }
+
+  Demangle::NodePointer
+  visitObjCProtocolTypeRef(const ObjCProtocolTypeRef *OC) {
+    auto module = Dem.createNode(Node::Kind::Module, MANGLING_MODULE_OBJC);
+    auto node = Dem.createNode(Node::Kind::Protocol);
+    node->addChild(module, Dem);
+    node->addChild(Dem.createNode(Node::Kind::Identifier, OC->getName()), Dem);
+    return node;
+  }
+
+#define REF_STORAGE(Name, name, ...)                                           \
+  Demangle::NodePointer visit##Name##StorageTypeRef(                           \
+      const Name##StorageTypeRef *US) {                                        \
+    auto node = Dem.createNode(Node::Kind::Name);                              \
+    node->addChild(visit(US->getType()), Dem);                                 \
+    return node;                                                               \
+  }
+#include "swift/AST/ReferenceStorage.def"
+
+  Demangle::NodePointer visitSILBoxTypeRef(const SILBoxTypeRef *SB) {
+    auto node = Dem.createNode(Node::Kind::SILBoxType);
+    node->addChild(visit(SB->getBoxedType()), Dem);
+    return node;
+  }
+
+  Demangle::NodePointer visitTypeRefRequirement(const TypeRefRequirement &req) {
+    switch (req.getKind()) {
+    case RequirementKind::SameShape: {
+      // Not implemented.
+      return nullptr;
+    }
+    case RequirementKind::Conformance: {
+      auto r = Dem.createNode(Node::Kind::DependentGenericConformanceRequirement);
+      r->addChild(visit(req.getFirstType()), Dem);
+      r->addChild(visit(req.getSecondType()), Dem);
+      return r;
+    }
+    case RequirementKind::Superclass: {
+      auto r = Dem.createNode(Node::Kind::DependentGenericConformanceRequirement);
+      r->addChild(visit(req.getFirstType()), Dem);
+      r->addChild(visit(req.getSecondType()), Dem);
+      return r;
+    }
+    case RequirementKind::SameType: {
+      auto r = Dem.createNode(Node::Kind::DependentGenericSameTypeRequirement);
+      r->addChild(visit(req.getFirstType()), Dem);
+      r->addChild(visit(req.getSecondType()), Dem);
+      return r;
+    }
+    case RequirementKind::Layout:
+      // Not implemented.
+      return nullptr;
+    }
+  }
+
+  Demangle::NodePointer
+  visitSILBoxTypeWithLayoutTypeRef(const SILBoxTypeWithLayoutTypeRef *SB) {
+    auto node = Dem.createNode(Node::Kind::SILBoxTypeWithLayout);
+    auto layout = Dem.createNode(Node::Kind::SILBoxLayout);
+    for (auto &f : SB->getFields()) {
+      auto field =
+          Dem.createNode(f.isMutable() ? Node::Kind::SILBoxMutableField
+                                       : Node::Kind::SILBoxImmutableField);
+      field->addChild(visit(f.getType()), Dem);
+      layout->addChild(field, Dem);
+    }
+    node->addChild(layout, Dem);
+
+    auto signature = Dem.createNode(Node::Kind::DependentGenericSignature);
+    auto addCount = [&](unsigned count) {
+      signature->addChild(
+          Dem.createNode(Node::Kind::DependentGenericParamCount, count), Dem);
+    };
+    unsigned depth = 0;
+    unsigned index = 0;
+    for (auto &s : SB->getSubstitutions())
+      if (auto *param = dyn_cast<GenericTypeParameterTypeRef>(s.first)) {
+        while (param->getDepth() > depth) {
+          addCount(index);
+          ++depth, index = 0;
+        }
+        assert(index == param->getIndex() && "generic params out of order");
+        ++index;
+      }
+    for (auto &req : SB->getRequirements()) {
+      auto *r = visitTypeRefRequirement(req);
+      if (!r)
+        continue;
+      signature->addChild(r, Dem);
+    }
+    node->addChild(signature, Dem);
+    auto list = Dem.createNode(Node::Kind::TypeList);
+    for (auto &subst : SB->getSubstitutions())
+      list->addChild(visit(subst.second), Dem);
+    node->addChild(list, Dem);
+    return node;
+  }
+
+  Demangle::NodePointer visitOpaqueTypeRef(const OpaqueTypeRef *O) {
+    return Dem.createNode(Node::Kind::OpaqueType);
+  }
+      
+  Demangle::NodePointer visitOpaqueArchetypeTypeRef(const OpaqueArchetypeTypeRef *O) {
+    auto decl = Dem.demangleType(O->getID());
+    if (!decl)
+      return nullptr;
+    
+    auto index = Dem.createNode(Node::Kind::Index, O->getOrdinal());
+    
+    auto argNodeLists = Dem.createNode(Node::Kind::TypeList);
+    for (auto argList : O->getArgumentLists()) {
+      auto argNodeList = Dem.createNode(Node::Kind::TypeList);
+      
+      for (auto arg : argList) {
+        auto argNode = visit(arg);
+        if (!argNode)
+          return nullptr;
+        
+        argNodeList->addChild(argNode, Dem);
+      }
+      
+      argNodeLists->addChild(argNodeList, Dem);
+    }
+    
+    auto node = Dem.createNode(Node::Kind::OpaqueType);
+    node->addChild(decl, Dem);
+    node->addChild(index, Dem);
+    node->addChild(argNodeLists, Dem);
+    
+    return node;
+  }
+};
+
+Demangle::NodePointer TypeRef::getDemangling(Demangle::Demangler &Dem) const {
+  return DemanglingForTypeRef(Dem).visit(this);
+}
+
+  }}

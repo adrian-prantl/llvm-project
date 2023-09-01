@@ -14,7 +14,7 @@
 
 #include "Plugins/LanguageRuntime/Swift/SwiftLanguageRuntime.h"
 #include "Plugins/TypeSystem/Clang/TypeSystemClang.h"
-#include "Plugins/TypeSystem/Swift/SwiftASTContext.h"
+//#include "Plugins/TypeSystem/Swift/SwiftASTContext.h"
 #include "lldb/Core/ValueObjectConstResult.h"
 #include "lldb/DataFormatters/FormattersHelpers.h"
 #include "lldb/Target/Process.h"
@@ -23,7 +23,7 @@
 // FIXME: we should not need this
 #include "Plugins/Language/ObjC/Cocoa.h"
 
-#include "swift/AST/ASTContext.h"
+//#include "swift/AST/ASTContext.h"
 #include "llvm/ADT/StringRef.h"
 
 using namespace lldb;
@@ -332,6 +332,7 @@ SwiftArrayBufferHandler::CreateBufferHandler(ValueObject &valobj) {
       return nullptr;
 
     CompilerType argument_type;
+#ifdef LLDB_ENABLE_SWIFT_COMPILER
 
     SwiftLanguageRuntime::MetadataPromiseSP promise_sp(
         swift_runtime->GetMetadataPromise(argmetadata_ptr, valobj));
@@ -349,6 +350,7 @@ SwiftArrayBufferHandler::CreateBufferHandler(ValueObject &valobj) {
         new SwiftArrayNativeBufferHandler(valobj, buffer_ptr, argument_type));
     if (handler && handler->IsValid())
       return handler;
+#endif
     return nullptr;
   }
 

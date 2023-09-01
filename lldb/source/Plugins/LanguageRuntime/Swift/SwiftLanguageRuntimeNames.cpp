@@ -13,6 +13,7 @@
 #include "SwiftLanguageRuntimeImpl.h"
 #include "SwiftLanguageRuntime.h"
 
+#include "Plugins/TypeSystem/Swift/TypeSystemSwiftTypeRef.h"
 #include "lldb/Breakpoint/StoppointCallbackContext.h"
 #include "lldb/Symbol/Block.h"
 #include "lldb/Symbol/CompileUnit.h"

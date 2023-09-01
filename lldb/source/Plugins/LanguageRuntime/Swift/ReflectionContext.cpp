@@ -336,13 +336,14 @@ public:
           swift::ReflectionSectionKind)>
           find_section,
       llvm::SmallVector<llvm::StringRef, 1> likely_module_names) override {
+    LLDB_LOG(GetLog(LLDBLog::Types), "{0} is not implemented", LLVM_PRETTY_FUNCTION);
     return {};
   }
 
   llvm::Optional<uint32_t>
   AddImage(swift::remote::RemoteAddress image_start,
            llvm::SmallVector<llvm::StringRef, 1> likely_module_names) override {
-    return {};
+    return swift_reflection_addImage(m_reflection_ctx, image_start.getAddressData());
   }
 
   llvm::Optional<uint32_t> ReadELF(
@@ -397,6 +398,27 @@ public:
   const swift::reflection::TypeInfo *
   GetTypeInfo(const swift::reflection::TypeRef *type_ref,
               swift::remote::TypeInfoProvider *provider) override {
+    if (!type_ref)
+      return nullptr;
+
+    swift_typeinfo_t info = swift_reflection_infoForTypeRef(
+        m_reflection_ctx, reinterpret_cast<swift_typeref_t>(type_ref));
+    switch (info.Kind) {
+    case SWIFT_STRUCT: {
+      const std::vector<swift::reflection::FieldInfo> fields;
+      return new (m_pool) swift::reflection::RecordTypeInfo(
+          info.Size, info.Alignment, info.Stride, 0, false,
+          swift::reflection::RecordKind::Struct, fields);
+    }
+    default:
+      LLDB_LOG(GetLog(LLDBLog::Types), "{0} is not implemented", info.Kind);
+      return nullptr;
+    }
+  }
+
+  const swift::reflection::TypeInfo *
+  GetTypeInfoFromInstance(lldb::addr_t instance,
+                          swift::remote::TypeInfoProvider *provider) override {
     LLDB_LOG(GetLog(LLDBLog::Types), "{0} is not implemented", LLVM_PRETTY_FUNCTION);
     return nullptr;
   }
@@ -418,6 +440,14 @@ public:
     LLDB_LOG(GetLog(LLDBLog::Types), "{0} is not implemented", LLVM_PRETTY_FUNCTION);
     return false;
   }
+
+    llvm::Optional<int32_t>
+  ProjectEnumValue(swift::remote::RemoteAddress enum_addr,
+                   const swift::reflection::TypeRef *enum_type_ref,
+                   swift::remote::TypeInfoProvider *provider) override {
+    return {};
+  }
+
 
   llvm::Optional<std::pair<const swift::reflection::TypeRef *,
                            swift::reflection::RemoteAddress>>

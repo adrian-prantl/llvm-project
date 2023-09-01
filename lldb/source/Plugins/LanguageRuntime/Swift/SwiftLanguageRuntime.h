@@ -14,11 +14,13 @@
 #define liblldb_SwiftLanguageRuntime_h_
 
 #include "Plugins/LanguageRuntime/ObjC/AppleObjCRuntime/AppleObjCRuntimeV2.h"
-#include "Plugins/TypeSystem/Swift/SwiftASTContext.h"
+#include "Plugins/TypeSystem/Swift/TypeSystemSwift.h"
 #include "lldb/Breakpoint/BreakpointPrecondition.h"
 #include "lldb/Core/PluginInterface.h"
 #include "lldb/Target/LanguageRuntime.h"
 #include "lldb/lldb-private.h"
+
+#include "swift/Demangling/Demangle.h"
 
 #include "llvm/ADT/Optional.h"
 #include "llvm/ADT/StringSet.h"
@@ -51,13 +53,9 @@ class TypeBase;
 
 namespace lldb_private {
 
-/// Statically cast a CompilerType to a Swift type.
-swift::Type GetSwiftType(CompilerType type);
-/// Statically cast a CompilerType to a Swift type and get its canonical form.
-swift::CanType GetCanonicalSwiftType(CompilerType type);
-
 class SwiftLanguageRuntimeStub;
 class SwiftLanguageRuntimeImpl;
+class TypeSystemSwiftTypeRef;
 
 class SwiftLanguageRuntime : public LanguageRuntime {
 protected:
@@ -237,6 +235,7 @@ public:
   CompilerType GetConcreteType(ExecutionContextScope *exe_scope,
                                ConstString abstract_type_name) override;
 
+#ifdef LLDB_ENABLE_SWIFT_COMPILER
   /// A proxy object to support lazy binding of Archetypes.
   class MetadataPromise {
     friend class SwiftLanguageRuntimeImpl;
@@ -257,7 +256,7 @@ public:
                                        ValueObject &for_object);
   /// Build the artificial type metadata variable name for \p swift_type.
   static bool GetAbstractTypeName(StreamString &name, swift::Type swift_type);
-
+#endif
   /// A pair of depth and index.
   using ArchetypePath = std::pair<uint64_t, uint64_t>;
   /// Populate a map with the names of all archetypes in a function's generic
@@ -379,12 +378,13 @@ public:
   /// Ask Remote mirrors for the alignment of a Swift type.
   llvm::Optional<size_t> GetBitAlignment(CompilerType type,
                                          ExecutionContextScope *exe_scope);
+#ifdef LLDB_ENABLE_SWIFT_COMPILER
 
   /// Release the RemoteASTContext associated with the given swift::ASTContext.
   /// Note that a RemoteASTContext must be destroyed before its associated
   /// swift::ASTContext is destroyed.
   void ReleaseAssociatedRemoteASTContext(swift::ASTContext *ctx);
-
+#endif
   void AddToLibraryNegativeCache(llvm::StringRef library_name);
   bool IsInLibraryNegativeCache(llvm::StringRef library_name);
 

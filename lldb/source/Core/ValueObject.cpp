@@ -53,7 +53,7 @@
 
 #ifdef LLDB_ENABLE_SWIFT
 #include "Plugins/ExpressionParser/Swift/SwiftPersistentExpressionState.h"
-#include "Plugins/TypeSystem/Swift/SwiftASTContext.h"
+//#include "Plugins/TypeSystem/Swift/SwiftASTContext.h"
 #endif //LLDB_ENABLE_SWIFT
 
 #include "llvm/Support/Compiler.h"

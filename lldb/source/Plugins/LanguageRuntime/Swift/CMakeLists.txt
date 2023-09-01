@@ -14,11 +14,13 @@ add_lldb_library(lldbPluginSwiftLanguageRuntime PLUGIN
   SwiftMetadataCache.cpp
 
   LINK_LIBS
-    swiftAST
-    swiftBasic
-    swiftRemoteInspection
-    swiftRemoteAST
+    ${SWIFT_AST}
+    ${SWIFT_BASIC}
+    ${SWIFT_REMOTE_AST}
+    ${SWIFT_REMOTE_INSPECTION}
     ${SWIFT_REMOTE_MIRROR}
+
+    "swiftDemangle"
     lldbCore
     lldbExpression
     lldbInterpreter
