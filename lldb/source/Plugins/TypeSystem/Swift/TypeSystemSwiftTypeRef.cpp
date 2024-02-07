@@ -3413,7 +3413,7 @@ size_t TypeSystemSwiftTypeRef::GetIndexOfChildMemberWithName(
       auto found_numidx = runtime->GetIndexOfChildMemberWithName(
           GetCanonicalType(type), name, exe_ctx, omit_empty_base_classes,
           child_indexes);
-      if (found_numidx.first) {
+      if (found_numidx.first != SwiftLanguageRuntime::eError) {
         size_t index_size = found_numidx.second.value_or(0);
 #ifndef NDEBUG
         // This block is a custom VALIDATE_AND_RETURN implementation to support
@@ -3436,17 +3436,11 @@ size_t TypeSystemSwiftTypeRef::GetIndexOfChildMemberWithName(
           return index_size;
 
         auto fail = [&]() {
-          auto join = [](const auto &v) {
-            std::ostringstream buf;
-            buf << "{";
-            for (const auto &item : v)
-              buf << item << ",";
-            buf.seekp(-1, std::ios_base::end);
-            buf << "}";
-            return buf.str();
-          };
-          llvm::dbgs() << join(child_indexes)
-                       << " != " << join(ast_child_indexes) << "\n";
+          llvm::dbgs() << "{";
+          llvm::interleaveComma(child_indexes, llvm::dbgs());
+          llvm::dbgs() << "} != {";
+          llvm::interleaveComma(ast_child_indexes, llvm::dbgs());
+          llvm::dbgs() << "}\n";
           llvm::dbgs() << "failing type was " << (const char *)type
                        << ", member was " << name << "\n";
           assert(false &&
