@@ -1674,10 +1674,12 @@ TypeSystemSwiftTypeRefForExpressions::TypeSystemSwiftTypeRefForExpressions(
     ConstString module = GetSwiftModuleFor(global_sc);
     const char *key = module.GetCString();
     m_swift_ast_context_map.insert(
-        {key, SwiftASTContext::CreateInstance(
-                  global_sc,
-                  *const_cast<TypeSystemSwiftTypeRefForExpressions *>(this),
-                  extra_options)});
+        {key,
+         {SwiftASTContext::CreateInstance(
+              global_sc,
+              *const_cast<TypeSystemSwiftTypeRefForExpressions *>(this),
+              extra_options),
+          0}});
   }
 }
 
@@ -1687,11 +1689,11 @@ void TypeSystemSwiftTypeRef::NotifyAllTypeSystems(
   std::vector<TypeSystemSP> typesystems;
   {
     std::lock_guard<std::mutex> guard(m_swift_ast_context_lock);
-    for (auto it : m_swift_ast_context_map)
-      typesystems.push_back(it.second);
+    for (auto &it : m_swift_ast_context_map)
+      typesystems.push_back(it.second.typesystem);
   }
   // Notify all SwiftASTContexts.
-  for (auto ts_sp : typesystems)
+  for (auto &ts_sp : typesystems)
     fn(ts_sp);
 }
 
@@ -1794,15 +1796,15 @@ TypeSystemSwiftTypeRef::GetSwiftASTContext(const SymbolContext &sc) const {
   if (it != m_swift_ast_context_map.end()) {
     // SwiftASTContext::CreateInstance() returns a nullptr on failure,
     // there is no point in trying to initialize when that happens.
-    if (!it->second)
+    if (!it->second.typesystem)
       return nullptr;
-    return llvm::cast<SwiftASTContext>(it->second.get());
+    return llvm::cast<SwiftASTContext>(it->second.typesystem.get());
   }
 
   // Create a new SwiftASTContextForExpressions.
   TypeSystemSP ts = SwiftASTContext::CreateInstance(
       sc, *const_cast<TypeSystemSwiftTypeRef *>(this));
-  m_swift_ast_context_map.insert({key, ts});
+  m_swift_ast_context_map.insert({key, {ts, 0}});
 
   auto *swift_ast_context = llvm::dyn_cast_or_null<SwiftASTContext>(ts.get());
   return swift_ast_context;
@@ -1814,6 +1816,7 @@ SwiftASTContext *TypeSystemSwiftTypeRefForExpressions::GetSwiftASTContext(
   const char *key = nullptr;
   ConstString module = GetSwiftModuleFor(sc);
   key = module.GetCString();
+  unsigned char retry_count = 0;
 
   // Look up the SwiftASTContext in the cache.
   TypeSystemSP ts;
@@ -1821,25 +1824,32 @@ SwiftASTContext *TypeSystemSwiftTypeRefForExpressions::GetSwiftASTContext(
     std::lock_guard<std::mutex> guard(m_swift_ast_context_lock);
     auto it = m_swift_ast_context_map.find(key);
     if (it != m_swift_ast_context_map.end()) {
+      retry_count = it->second.retry_count + 1;
       // SwiftASTContext::CreateInstance() returns a nullptr on failure,
       // there is no point in trying to initialize when that happens.
-      if (!it->second)
+      if (!it->second.typesystem)
         return nullptr;
-      auto *swift_ast_ctx = llvm::cast<SwiftASTContext>(it->second.get());
+      auto *swift_ast_ctx =
+          llvm::cast<SwiftASTContext>(it->second.typesystem.get());
       if (!swift_ast_ctx->HasFatalErrors())
         return swift_ast_ctx;
+
       // Recreate the SwiftASTContext if it has developed fatal errors. Any
       // clients holding on to the old context via a CompilerType will keep its
       // shared_ptr alive.
+      if (retry_count > 3) {
+        LLDB_LOG(GetLog(LLDBLog::Types), "maximum number of retries reached");
+        return nullptr;
+      }
       m_swift_ast_context_map.erase(key);
-      LLDB_LOGF(GetLog(LLDBLog::Types),
-                "Recreating SwiftASTContext due to fatal errors.");
+      LLDB_LOG(GetLog(LLDBLog::Types),
+               "Recreating SwiftASTContext due to fatal errors.");
     }
 
     // Create a new SwiftASTContextForExpressions.
     ts = SwiftASTContext::CreateInstance(
         sc, *const_cast<TypeSystemSwiftTypeRefForExpressions *>(this));
-    m_swift_ast_context_map.insert({key, ts});
+    m_swift_ast_context_map.insert({key, {ts, retry_count}});
   }
 
   // Now perform the initial imports. This step can be very expensive.
@@ -1873,7 +1883,7 @@ SwiftASTContext *TypeSystemSwiftTypeRef::GetSwiftASTContextOrNull(
   const char *key = nullptr;
   auto it = m_swift_ast_context_map.find(key);
   if (it != m_swift_ast_context_map.end())
-    return llvm::cast_or_null<SwiftASTContext>(it->second.get());
+    return llvm::cast_or_null<SwiftASTContext>(it->second.typesystem.get());
   return nullptr;
 }
 
@@ -1887,7 +1897,7 @@ SwiftASTContext *TypeSystemSwiftTypeRefForExpressions::GetSwiftASTContextOrNull(
 
   auto it = m_swift_ast_context_map.find(key);
   if (it != m_swift_ast_context_map.end())
-    return llvm::cast_or_null<SwiftASTContext>(it->second.get());
+    return llvm::cast_or_null<SwiftASTContext>(it->second.typesystem.get());
   return nullptr;
 }
 
@@ -2373,8 +2383,6 @@ constexpr ExecutionContextScope *g_no_exe_ctx = nullptr;
       if (frame->GetSymbolContext(eSymbolContextFunction).GetFunctionName() == \
           SwiftLanguageRuntime::GetErrorBackstopName())                        \
         return result;                                                         \
-    auto swift_scratch_ctx_lock = SwiftScratchContextLock(                     \
-        _exe_ctx == ExecutionContext() ? nullptr : &_exe_ctx);                 \
     bool equivalent =                                                          \
         !ReconstructType(TYPE) /* missing .swiftmodule */ ||                   \
         (Equivalent(result, GetSwiftASTContextFromExecutionContext(&_exe_ctx)  \
@@ -2404,8 +2412,6 @@ constexpr ExecutionContextScope *g_no_exe_ctx = nullptr;
       if (frame->GetSymbolContext(eSymbolContextFunction).GetFunctionName() == \
           SwiftLanguageRuntime::GetErrorBackstopName())                        \
         return result;                                                         \
-    auto swift_scratch_ctx_lock = SwiftScratchContextLock(                     \
-        _exe_ctx == ExecutionContext() ? nullptr : &_exe_ctx);                 \
     bool equivalent = true;                                                    \
     if (ReconstructType(TYPE)) {                                               \
       equivalent =                                                             \
@@ -3693,7 +3699,6 @@ size_t TypeSystemSwiftTypeRef::GetIndexOfChildMemberWithName(
           return index_size;
         if (!GetSwiftASTContextFromExecutionContext(exe_ctx))
           return index_size;
-        auto swift_scratch_ctx_lock = SwiftScratchContextLock(exe_ctx);
         auto ast_type = ReconstructType(type, exe_ctx);
         if (!ast_type)
           return index_size;

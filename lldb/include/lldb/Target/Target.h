@@ -24,7 +24,6 @@
 #include "lldb/Core/ModuleList.h"
 #include "lldb/Core/StructuredDataImpl.h"
 #include "lldb/Core/UserSettingsController.h"
-#include "lldb/Core/SwiftScratchContextReader.h"
 #include "lldb/Expression/Expression.h"
 #include "lldb/Host/ProcessLaunchInfo.h"
 #include "lldb/Interpreter/OptionValueBoolean.h"
@@ -52,7 +51,10 @@ namespace lldb_private {
 class ClangModulesDeclVendor;
 class SwiftPersistentExpressionState;
 class SharedMutex;
-class SwiftASTContextForExpressions;
+class TypeSystemSwiftTypeRefForExpressions;
+typedef std::shared_ptr<TypeSystemSwiftTypeRefForExpressions>
+    TypeSystemSwiftTypeRefForExpressionsSP;
+
 
 OptionEnumValues GetDynamicValueTypes();
 
@@ -1299,7 +1301,7 @@ public:
     return m_scratch_typesystem_lock;
   }
 
-  std::optional<SwiftScratchContextReader>
+  TypeSystemSwiftTypeRefForExpressionsSP
   GetSwiftScratchContext(Status &error, ExecutionContextScope &exe_scope,
                          bool create_on_demand = true,
                          bool for_playground = false);
@@ -1310,9 +1312,6 @@ public:
   bool IsSwiftCxxInteropEnabled();
 
   bool IsEmbeddedSwift();
-private:
-  void DisplayFallbackSwiftContextErrors(
-      SwiftASTContextForExpressions *swift_ast_ctx);
 #endif // LLDB_ENABLE_SWIFT
 
 public:
@@ -1718,11 +1717,7 @@ protected:
   /// signals you will have.
   llvm::StringMap<DummySignalValues> m_dummy_signals;
 
-  bool m_use_scratch_typesystem_per_module = false;
   bool m_did_display_scratch_fallback_warning = false;
-  typedef std::pair<lldb_private::Module *, char> ModuleLanguage;
-  llvm::DenseMap<ModuleLanguage, lldb::TypeSystemSP>
-      m_scratch_typesystem_for_module;
 
   /// Guards the scratch typesystem from being re-initialized.
   std::shared_mutex m_scratch_typesystem_lock;

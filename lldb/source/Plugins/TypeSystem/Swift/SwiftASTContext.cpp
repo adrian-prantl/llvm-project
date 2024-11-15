@@ -6518,8 +6518,8 @@ SwiftASTContext::GetBitSize(opaque_compiler_type_t type,
       return {};
     ExecutionContext exe_ctx;
     exe_scope->CalculateExecutionContext(exe_ctx);
-    auto swift_scratch_ctx_lock = SwiftScratchContextLock(&exe_ctx);
-    CompilerType bound_type = BindGenericTypeParameters({weak_from_this(), type}, exe_scope);
+    CompilerType bound_type =
+        BindGenericTypeParameters({weak_from_this(), type}, exe_scope);
 
     // Check that the type has been bound successfully -- and if not,
     // log the event and bail out to avoid an infinite loop.
@@ -6568,8 +6568,8 @@ SwiftASTContext::GetByteStride(opaque_compiler_type_t type,
       return {};
     ExecutionContext exe_ctx;
     exe_scope->CalculateExecutionContext(exe_ctx);
-    auto swift_scratch_ctx_lock = SwiftScratchContextLock(&exe_ctx);
-    CompilerType bound_type = BindGenericTypeParameters({weak_from_this(), type}, exe_scope);
+    CompilerType bound_type =
+        BindGenericTypeParameters({weak_from_this(), type}, exe_scope);
 
     // Check that the type has been bound successfully -- and if not,
     // log the event and bail out to avoid an infinite loop.
@@ -6611,8 +6611,8 @@ SwiftASTContext::GetTypeBitAlign(opaque_compiler_type_t type,
       return {};
     ExecutionContext exe_ctx;
     exe_scope->CalculateExecutionContext(exe_ctx);
-    auto swift_scratch_ctx_lock = SwiftScratchContextLock(&exe_ctx);
-    CompilerType bound_type = BindGenericTypeParameters({weak_from_this(), type}, exe_scope);
+    CompilerType bound_type =
+        BindGenericTypeParameters({weak_from_this(), type}, exe_scope);
 
     // Check that the type has been bound successfully -- and if not,
     // log the event and bail out to avoid an infinite loop.
@@ -8781,6 +8781,7 @@ SwiftASTContextForExpressions::SwiftASTContextForExpressions(
 }
 
 SwiftASTContextForExpressions::~SwiftASTContextForExpressions() {
+  LOG_PRINTF(GetLog(LLDBLog::Types | LLDBLog::Expressions), "tearing down");
   swift::ASTContext *ctx = m_ast_context_ap.get();
   if (!ctx)
     return;

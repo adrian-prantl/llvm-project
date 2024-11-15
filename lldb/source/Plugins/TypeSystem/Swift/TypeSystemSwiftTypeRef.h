@@ -481,11 +481,17 @@ protected:
 
   /// Perform an action on all subling SwiftASTContexts.
   void NotifyAllTypeSystems(std::function<void(lldb::TypeSystemSP)> fn);
-  
+
+  struct TypeSystemAndCount {
+    lldb::TypeSystemSP typesystem;
+    /// Count how often this typesystem was initialized.
+    unsigned char retry_count = 0;
+  };
+
   mutable std::mutex m_swift_ast_context_lock;
   /// The "precise" SwiftASTContexts managed by this scratch context. There
   /// exists one per Swift module. The keys in this map are module names.
-  mutable llvm::DenseMap<const char *, lldb::TypeSystemSP>
+  mutable llvm::DenseMap<const char *, TypeSystemAndCount>
       m_swift_ast_context_map;
 
   mutable std::unique_ptr<SwiftDWARFImporterForClangTypes>
