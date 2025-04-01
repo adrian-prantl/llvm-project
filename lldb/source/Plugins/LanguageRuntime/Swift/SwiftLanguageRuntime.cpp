@@ -373,7 +373,7 @@ void SwiftLanguageRuntime::ProcessModulesToAdd() {
 
   auto &target = GetProcess().GetTarget();
   auto exe_module = target.GetExecutableModule();
-  Progress progress("Setting up Swift reflection", {},
+  Progress progress("Loading Swift reflection metadata", {},
                     modules_to_add_snapshot.GetSize());
   size_t completion = 0;
 
