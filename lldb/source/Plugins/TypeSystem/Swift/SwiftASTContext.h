@@ -902,6 +902,18 @@ protected:
   /// This function implements various heuristics to find a CAS
   /// configuration file.
   void ConfigureCASStorage(const SymbolContext &sc);
+  /// Extract the bridging PCH from debug info an set the ClangImporter option.
+  void ConfigureBridgingHeader(const SymbolContext &sc);
+
+  /// Get the contents of a file or CAS path.
+  llvm::Expected<std::unique_ptr<llvm::MemoryBuffer>>
+  GetModuleContents(llvm::StringRef path);
+
+  bool DiscoverExplicitMainModule(const SymbolContext &sc, const Module &image);
+
+  void DiscoverImplicitlyTrackedModules(
+      const ModuleList &modules, lldb::ModuleSP module_sp,
+      std::vector<std::string> &module_names);
 
   llvm::Error GetCompileUnitImportsImpl(
       const SymbolContext &sc, lldb::ProcessSP process_sp,
@@ -1020,9 +1032,9 @@ protected:
   // FIXME: this vector is needed because the LLDBNameLookup debugger clients
   // are being put into the Module for the SourceFile that we compile the
   // expression into, and so have to live as long as the Module. But it's too
-  // late to change swift to get it to take ownership of these DebuggerClients.
-  // Since we use the same Target SwiftASTContext for all our compilations,
-  // holding them here will keep them alive as long as we need.
+  // late to change swift to get it to take ownership of these
+  // DebuggerClients. Since we use the same Target SwiftASTContext for all our
+  // compilations, holding them here will keep them alive as long as we need.
   std::vector<std::unique_ptr<swift::DebuggerClient>> m_debugger_clients;
   bool m_initialized_language_options = false;
   bool m_initialized_search_path_options = false;
@@ -1052,7 +1064,7 @@ protected:
       m_stored_properties;
 
   /// @}
-};
+  };
 
 /// Deprecated.
 class SwiftASTContextForModule : public SwiftASTContext {
