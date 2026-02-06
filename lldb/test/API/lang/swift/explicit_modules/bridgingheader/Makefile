@@ -11,4 +11,6 @@ include Makefile.rules
 
 secret.h:
 	mkdir -p $(BUILDDIR)/secret
-	echo "struct S { int i; };" > $(BUILDDIR)/secret/secret.h
+	echo "#ifndef SECRET_H" > $(BUILDDIR)/secret/secret.h
+	echo "struct S { int i; };" >> $(BUILDDIR)/secret/secret.h
+	echo "#endif" >> $(BUILDDIR)/secret/secret.h

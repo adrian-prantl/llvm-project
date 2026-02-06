@@ -19,7 +19,7 @@ class TestSwiftExplicitModules(lldbtest.TestBase):
             self, 'Set breakpoint here', lldb.SBFileSpec('main.swift'))
         log = self.getBuildArtifact("types.log")
         self.expect('log enable lldb types -f "%s"' % log)
-
+        self.runCmd('settings set symbols.swift-validate-typesystem false')
         self.expect("frame variable s", substrs=['i = 23'])
         self.expect("frame variable m", substrs=['j = 42'])
         self.expect("expression s", substrs=['i = 23'])
