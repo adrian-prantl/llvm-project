@@ -4000,7 +4000,7 @@ ThreadSafeASTContext SwiftASTContext::GetASTContext() {
     auto &search_path_opts = GetCompilerInvocation().getSearchPathOptions();
     std::unique_ptr<swift::ModuleLoader> esml_up =
         LLDBExplicitSwiftModuleLoader::create(
-            *m_ast_context_up, m_cas.get(), m_action_cache.get(),
+            *m_ast_context_up, m_cas, m_action_cache,
             m_dependency_tracker.get(), loading_mode,
             search_path_opts.ExplicitSwiftModuleMapPath,
             search_path_opts.ExplicitSwiftModuleInputs,

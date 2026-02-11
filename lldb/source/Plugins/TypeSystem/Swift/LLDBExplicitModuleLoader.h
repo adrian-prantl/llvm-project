@@ -13,7 +13,10 @@
 #ifndef liblldb_LLDBExplicitModuleLoader_h_
 #define liblldb_LLDBExplicitModuleLoader_h_
 
-#include <swift/Serialization/SerializedModuleLoader.h>
+#include "swift/Serialization/SerializedModuleLoader.h"
+#include "llvm/ADT/StringSet.h"
+#include <memory>
+
 namespace swift {
 class ExplicitSwiftModuleLoader;
 class ExplicitCASModuleLoader;
@@ -26,16 +29,17 @@ namespace lldb_private {
 class LLDBExplicitSwiftModuleLoader : public swift::SerializedModuleLoaderBase {
 public:
   LLDBExplicitSwiftModuleLoader(
-      swift::ASTContext &ctx, llvm::cas::ObjectStore *CAS,
+      swift::ASTContext &ctx, std::shared_ptr<llvm::cas::ObjectStore> cas,
+      std::shared_ptr<llvm::cas::ActionCache> action_cache,
       swift::DependencyTracker *tracker, swift::ModuleLoadingMode LoadMode,
       bool IgnoreSwiftSourceInfoFile,
       std::unique_ptr<swift::ExplicitCASModuleLoader> casml,
       std::unique_ptr<swift::ExplicitSwiftModuleLoader> esml);
 
   static std::unique_ptr<LLDBExplicitSwiftModuleLoader>
-  create(swift::ASTContext &ctx, llvm::cas::ObjectStore *CAS,
-         llvm::cas::ActionCache *cache, swift::DependencyTracker *tracker,
-         swift::ModuleLoadingMode loadMode,
+  create(swift::ASTContext &ctx, std::shared_ptr<llvm::cas::ObjectStore> cas,
+         std::shared_ptr<llvm::cas::ActionCache> action_cache,
+         swift::DependencyTracker *tracker, swift::ModuleLoadingMode loadMode,
          llvm::StringRef ExplicitSwiftModuleMap,
          const llvm::StringMap<std::string> &ExplicitSwiftModuleInputs,
          bool IgnoreSwiftSourceInfoFile);
@@ -75,11 +79,13 @@ public:
   void addExplicitModulePath(llvm::StringRef name, std::string path) override;
 
 protected:
-  llvm::cas::ObjectStore *m_cas;
+  std::shared_ptr<llvm::cas::ObjectStore> m_cas;
+  std::shared_ptr<llvm::cas::ActionCache> m_action_cache;  
   /// The CAS Swift module loader.
   std::unique_ptr<swift::ExplicitCASModuleLoader> m_casml;
   /// The explicit Swift module loader (ESML).
   std::unique_ptr<swift::ExplicitSwiftModuleLoader> m_esml;
+  llvm::StringSet<> m_known_modules;  
 };
 } // namespace lldb_private
 #endif

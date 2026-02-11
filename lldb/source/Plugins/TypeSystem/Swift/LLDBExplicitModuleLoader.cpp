@@ -20,34 +20,37 @@
 namespace lldb_private {
 
 LLDBExplicitSwiftModuleLoader::LLDBExplicitSwiftModuleLoader(
-    swift::ASTContext &ctx, llvm::cas::ObjectStore *CAS,
+    swift::ASTContext &ctx, std::shared_ptr<llvm::cas::ObjectStore> cas,
+    std::shared_ptr<llvm::cas::ActionCache> action_cache,
     swift::DependencyTracker *tracker, swift::ModuleLoadingMode loadMode,
     bool IgnoreSwiftSourceInfoFile,
     std::unique_ptr<swift::ExplicitCASModuleLoader> casml,
     std::unique_ptr<swift::ExplicitSwiftModuleLoader> esml)
     : swift::SerializedModuleLoaderBase(ctx, tracker, loadMode,
                                         IgnoreSwiftSourceInfoFile),
-      m_cas(CAS), m_casml(std::move(casml)), m_esml(std::move(esml)) {}
+      m_cas(cas), m_action_cache(action_cache), m_casml(std::move(casml)),
+      m_esml(std::move(esml)) {}
 
 std::unique_ptr<LLDBExplicitSwiftModuleLoader>
 LLDBExplicitSwiftModuleLoader::create(
-    swift::ASTContext &ctx, llvm::cas::ObjectStore *CAS,
-    llvm::cas::ActionCache *cache, swift::DependencyTracker *tracker,
-    swift::ModuleLoadingMode loadMode, llvm::StringRef ExplicitSwiftModuleMap,
+    swift::ASTContext &ctx, std::shared_ptr<llvm::cas::ObjectStore> cas,
+    std::shared_ptr<llvm::cas::ActionCache> action_cache,
+    swift::DependencyTracker *tracker, swift::ModuleLoadingMode loadMode,
+    llvm::StringRef ExplicitSwiftModuleMap,
     const llvm::StringMap<std::string> &ExplicitSwiftModuleInputs,
     bool IgnoreSwiftSourceInfoFile) {
   auto esml = swift::ExplicitSwiftModuleLoader::create(
       ctx, tracker, loadMode, ExplicitSwiftModuleMap, ExplicitSwiftModuleInputs,
       IgnoreSwiftSourceInfoFile);
   std::unique_ptr<swift::ExplicitCASModuleLoader> casml;
-  if (CAS && cache) {
+  if (cas && action_cache) {
     casml = swift::ExplicitCASModuleLoader::create(
-        ctx, *CAS, *cache, tracker, loadMode, ExplicitSwiftModuleMap,
+        ctx, *cas, *action_cache, tracker, loadMode, ExplicitSwiftModuleMap,
         ExplicitSwiftModuleInputs, IgnoreSwiftSourceInfoFile);
   }
   return std::make_unique<LLDBExplicitSwiftModuleLoader>(
-      ctx, CAS, tracker, loadMode, IgnoreSwiftSourceInfoFile, std::move(casml),
-      std::move(esml));
+      ctx, cas, action_cache, tracker, loadMode, IgnoreSwiftSourceInfoFile,
+      std::move(casml), std::move(esml));
 }
 
 void LLDBExplicitSwiftModuleLoader::collectVisibleTopLevelModuleNames(
@@ -127,19 +130,52 @@ void LLDBExplicitSwiftModuleLoader::verifyAllModules() {
 
 void LLDBExplicitSwiftModuleLoader::addExplicitModulePath(llvm::StringRef name,
                                                           std::string path) {
+  // We trust module paths found in DWARF (= found first) over module
+  // paths deserialized from Swift modules. Under some curcumstances
+  // Swift modules could have been built elsewhere and injected into
+  // even an EBM build.
+  if (m_known_modules.count(name))
+    return;
+
+  // CAS.  
   if (m_cas && m_casml) {
     llvm::Expected<llvm::cas::CASID> parsed_id = m_cas->parseID(path);
     if (parsed_id) {
+      llvm::Expected<std::optional<llvm::cas::CASID>> lookup =
+          m_action_cache->get(*parsed_id);
+      if (!lookup) {
+        LLDB_LOG(GetLog(LLDBLog::Types),
+                 "ignoring unavailable explicitly tracked module \"{0}\" at "
+                 "CAS id \"{1}\"",
+                 name, path);
+        return;        
+      }
+      // Found in CAS.
       LLDB_LOG(GetLog(LLDBLog::Types),
                "discovered explicitly tracked module \"{0}\" at CAS id \"{1}\"",
                name, path);
-      return m_casml->addExplicitModulePath(name, path);
+      m_known_modules.insert(name);
+      m_casml->addExplicitModulePath(name, path);
+      return;
     }
+    // Not a CAS URL.    
     llvm::consumeError(parsed_id.takeError());
   }
+
+  // Filesystem.
+  if (!llvm::sys::fs::exists(path)) {
+    LLDB_LOG(
+        GetLog(LLDBLog::Types),
+        "ignoring unavailable explicitly tracked module \"{0}\" at \"{1}\"",
+        name, path);
+    return;
+  }
+
+  // Found on disk..  
   LLDB_LOG(GetLog(LLDBLog::Types),
            "discovered explicitly tracked module \"{0}\" at \"{1}\"", name,
            path);
+  m_known_modules.insert(name);
   m_esml->addExplicitModulePath(name, path);
 }
 
