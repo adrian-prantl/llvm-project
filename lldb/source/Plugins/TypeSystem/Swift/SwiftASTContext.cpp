@@ -4319,25 +4319,6 @@ SwiftASTContext::GetModule(const SourceModule &module, bool *cached) {
 
   // Create a diagnostic consumer for the diagnostics produced by the import.
   auto import_diags = getScopedDiagnosticConsumer();
-
-  // Is this an explicitly specified explicit Swift module?
-  StringRef module_path = module.search_path.GetStringRef();
-  bool is_esml_module =
-      (module_path.ends_with(".swiftmodule") &&
-       FileSystem::Instance().Exists(FileSpec(module.search_path))) ||
-      IsModuleAvailableInCAS(module_path.str());
-  if (is_esml_module) {
-    std::string path = module_path.str();
-    bool unloaded = false;
-    if (m_explicit_swift_module_loader) {
-      ast->addExplicitModulePath(module_name, path);
-      if (auto *memory_loader = GetMemoryBufferModuleLoader())
-        unloaded = memory_loader->unregisterMemoryBuffer(module_name);
-    }
-    HEALTH_LOG_PRINTF("found explicitly tracked module \"%s\"%s", path.c_str(),
-                      unloaded ? "; replacing AST section module" : "");
-  }
-
   swift::ModuleDecl *module_decl = ast->getModuleByName(module_name);
 
   // Error handling.
@@ -4366,7 +4347,7 @@ SwiftASTContext::GetModule(const SourceModule &module, bool *cached) {
   LOG_PRINTF(GetLog(LLDBLog::Types), "(\"%s\") -- found %s",
              module_name.c_str(), module_decl->getName().str().str().c_str());
 
-  if (is_esml_module) {
+  //if (is_esml_module) {
     // Simulate the effect of the BypassResilience flag in the
     // MemoryBufferSerializedModuleLoader.  Explicitly specified
     // modules are not typically produced from textual interfaces. By
@@ -4374,7 +4355,7 @@ SwiftASTContext::GetModule(const SourceModule &module, bool *cached) {
     // members.
     //if (!module_decl->isBuiltFromInterface())
     //  module_decl->setBypassResilience();
-  }
+  //}
 
   m_swift_module_cache.insert({module_name, *module_decl});
   return *module_decl;
@@ -9722,10 +9703,41 @@ llvm::Error SwiftASTContext::GetCompileUnitImportsImpl(
 
   bool loaded_stdlib = false;
   if (compile_unit && compile_unit->GetLanguage() == lldb::eLanguageTypeSwift) {
+    ThreadSafeASTContext ast = GetASTContext();
+    if (!ast)
+      return llvm::createStringError("invalid swift AST (nullptr)");
+        
     std::vector<SourceModule> cu_imports = compile_unit->GetImportedModules();
     LOG_PRINTF(GetLog(LLDBLog::Types), "Importing dependencies of current CU");
     std::string category = "Importing dependencies for ";
     category += compile_unit->GetPrimaryFile().GetFilename().GetString();
+    // Register explicitly tracked modules. This needs to be done in a
+    // first pass, because module imports are recursive and typically
+    // all dependencies are listed as imports in debug info.
+    for (const SourceModule &module : cu_imports) {
+      // Is this an explicitly specified explicit Swift module?
+      StringRef module_path = module.search_path.GetStringRef();
+      bool is_esml_module =
+          (module_path.ends_with(".swiftmodule") &&
+           FileSystem::Instance().Exists(FileSpec(module.search_path))) ||
+          IsModuleAvailableInCAS(module_path.str());
+      if (!is_esml_module) continue;
+        std::string path = module_path.str();
+        bool unloaded = false;
+        if (!m_explicit_swift_module_loader)
+          continue;
+        if (!module.path.size())
+          continue;
+        ConstString module_name = module.path.front();
+        ast->addExplicitModulePath(module_name, module.search_path.GetString());
+        if (auto *memory_loader = GetMemoryBufferModuleLoader())
+          unloaded = memory_loader->unregisterMemoryBuffer(module_name);
+
+        HEALTH_LOG_PRINTF("found explicitly tracked module \"%s\"%s",
+                          path.c_str(),
+                          unloaded ? "; replacing AST section module" : "");
+    }
+    // Load modules.    
     auto module_import_progress_raii = GetModuleImportProgressRAII(category);
     for (const SourceModule &module : cu_imports) {
       // When building the Swift stdlib with debug info these will
