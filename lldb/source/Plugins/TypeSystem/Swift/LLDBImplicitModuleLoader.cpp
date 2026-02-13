@@ -62,6 +62,7 @@ std::error_code LLDBImplicitSwiftModuleLoader::findModuleFilesInDirectory(
   // This is a protected member and probably also not useful.
   return {};
 }
+
 bool LLDBImplicitSwiftModuleLoader::canImportModule(
     swift::ImportPath::Module named, swift::SourceLoc loc,
     ModuleVersionInfo *versionInfo, bool isTestableImport) {

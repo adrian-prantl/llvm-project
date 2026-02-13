@@ -1937,8 +1937,9 @@ bool SwiftASTContext::IsModuleAvailableInCAS(const std::string &key) {
   }
   auto lookup = m_action_cache->get(*id);
   if (!lookup) {
+    std::string msg = toString(lookup.takeError());    
     HEALTH_LOG_PRINTF("module lookup failure through action cache: %s",
-                      toString(lookup.takeError()).c_str());
+                      msg.c_str());
     return false;
   }
   return (bool)*lookup;

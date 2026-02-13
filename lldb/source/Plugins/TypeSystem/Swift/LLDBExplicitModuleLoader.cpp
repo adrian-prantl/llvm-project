@@ -143,12 +143,17 @@ void LLDBExplicitSwiftModuleLoader::addExplicitModulePath(llvm::StringRef name,
     if (parsed_id) {
       llvm::Expected<std::optional<llvm::cas::CASID>> lookup =
           m_action_cache->get(*parsed_id);
-      if (!lookup) {
+      if (!lookup)
+        LLDB_LOG_ERROR(GetLog(LLDBLog::Types), lookup.takeError(),
+                       "ignoring unavailable explicitly tracked module \"{1}\" "
+                       "at CAS id \"{2}\", error: {0}",
+                       name, path);
+      if (!*lookup) {
         LLDB_LOG(GetLog(LLDBLog::Types),
                  "ignoring unavailable explicitly tracked module \"{0}\" at "
                  "CAS id \"{1}\"",
                  name, path);
-        return;        
+        return;
       }
       // Found in CAS.
       LLDB_LOG(GetLog(LLDBLog::Types),
