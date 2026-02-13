@@ -48,6 +48,7 @@ public:
       bool IsCanImportLookup, bool IsFramework,
       bool IsTestableDependencyLookup = false) override;
 
+  bool isSDKOverlay(swift::ImportPath::Module named) const;
   bool canImportModule(swift::ImportPath::Module named, swift::SourceLoc loc,
                        ModuleVersionInfo *versionInfo,
                        bool isTestableImport = false) override;

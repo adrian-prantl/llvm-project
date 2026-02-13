@@ -4100,8 +4100,13 @@ ThreadSafeASTContext SwiftASTContext::GetASTContext() {
   if (!m_ast_context_up->SearchPathOpts.getSDKPath().empty() ||
       TargetHasNoSDK()) {
     // Create the DWARFImporterDelegate.
+    //
+    // Unless in EBM mode. DWARFImporter aggressively "finds" every
+    // module, which interfer with the ESMLS which depends replaying
+    // exactly all non-fatal module-import errors. For example Swift
+    // overlays may fail to import without consequences.
     const auto &props = ModuleList::GetGlobalModuleListProperties();
-    if (props.GetUseSwiftDWARFImporter())
+    if (props.GetUseSwiftDWARFImporter() && !m_has_explicit_modules)
       m_dwarfimporter_delegate_up =
           std::make_unique<SwiftDWARFImporterDelegate>(*this);
     auto importer_diags = getScopedDiagnosticConsumer();
@@ -9685,8 +9690,6 @@ llvm::Error SwiftASTContext::GetCompileUnitImportsImpl(
     const SymbolContext &sc, lldb::ProcessSP process_sp,
     llvm::SmallVectorImpl<swift::AttributedImport<swift::ImportedModule>>
         *modules) {
-  // If EBM is enabled, disable implicit modules during contextual imports.
-  DisableImplicitImportsRAII no_implicit_imports_raii(*this);
   CompileUnit *compile_unit = sc.comp_unit;
   if (compile_unit && compile_unit->GetModule())
     // Check the cache if this compile unit's imports were previously
@@ -9704,12 +9707,14 @@ llvm::Error SwiftASTContext::GetCompileUnitImportsImpl(
 
   bool loaded_stdlib = false;
   if (compile_unit && compile_unit->GetLanguage() == lldb::eLanguageTypeSwift) {
+    std::vector<SourceModule> cu_imports = compile_unit->GetImportedModules();
+    LOG_PRINTF(GetLog(LLDBLog::Types), "Importing dependencies of current CU");
+
+    // 1. Scan explicitly tracked modules.
     ThreadSafeASTContext ast = GetASTContext();
     if (!ast)
       return llvm::createStringError("invalid swift AST (nullptr)");
-        
-    std::vector<SourceModule> cu_imports = compile_unit->GetImportedModules();
-    LOG_PRINTF(GetLog(LLDBLog::Types), "Importing dependencies of current CU");
+
     std::string category = "Importing dependencies for ";
     category += compile_unit->GetPrimaryFile().GetFilename().GetString();
     // Register explicitly tracked modules. This needs to be done in a
@@ -9738,8 +9743,11 @@ llvm::Error SwiftASTContext::GetCompileUnitImportsImpl(
                           path.c_str(),
                           unloaded ? "; replacing AST section module" : "");
     }
-    // Load modules.    
+
+    // 2. Load binary modules.
     auto module_import_progress_raii = GetModuleImportProgressRAII(category);
+    // If EBM is enabled, disable implicit modules during contextual imports.
+    DisableImplicitImportsRAII no_implicit_imports_raii(*this);
     for (const SourceModule &module : cu_imports) {
       // When building the Swift stdlib with debug info these will
       // show up in "Swift.o", but we already imported them and
