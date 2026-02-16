@@ -263,7 +263,9 @@ public:
       llvm::ArrayRef<std::pair<std::string, bool>> framework_search_paths);
 
   swift::ClangImporterOptions &GetClangImporterOptions();
-
+  swift::ModuleInterfaceLoader *GetModuleInterfaceLoader() {
+    return m_module_interface_loader;
+  }
   swift::CompilerInvocation &GetCompilerInvocation();
 
   swift::SILOptions &GetSILOptions();
@@ -488,7 +490,7 @@ public:
   /// indicate what went wrong.
   CompilerType ImportType(CompilerType &type, Status &error);
 
-  swift::ClangImporter *GetClangImporter();
+  swift::ClangImporter *GetClangImporter() { return m_clangimporter; }
 
   CompilerType
   CreateTupleType(const std::vector<TupleElement> &elements) override;
@@ -574,6 +576,7 @@ public:
   bool HasTarget();
   bool HasExplicitModules() const { return m_has_explicit_modules; }
   bool ImplicitModulesDisabled() const { return m_implicit_modules_disabled; }
+  void SetImplicitModulesDisabled(bool b) { m_implicit_modules_disabled = b; }
   bool HasCAS() const { return m_cas_initialized; }
   bool CheckProcessChanged();
 

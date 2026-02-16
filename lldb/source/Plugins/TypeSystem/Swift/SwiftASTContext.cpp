@@ -3881,6 +3881,68 @@ void SwiftASTContext::AddFrameworkSearchPaths(
   invocation.computeCXXStdlibOptions();
 }
 
+std::optional<clang::DarwinSDKInfo> &SwiftASTContext::GetSDKInfo() {
+  return GetCompilerInvocation().getSDKInfo();
+}
+
+namespace {
+/// RAII object to temporarily disable implicit module imports during
+/// context imports or while importing a bridging PCH.
+class DisableImplicitImportsRAII {
+public:
+  DisableImplicitImportsRAII(SwiftASTContext &swift_ast_ctx)
+      : m_swift_ast_ctx(swift_ast_ctx) {
+    const std::string &m_description = m_swift_ast_ctx.GetDescription();
+    bool disable =
+        m_swift_ast_ctx.HasExplicitModules() &&
+        !Target::GetGlobalProperties().GetSwiftAllowImplicitModules();
+    if (!disable)
+      return;
+    m_swift_ast_ctx.SetImplicitModulesDisabled(disable);
+    LOG_PRINTF(GetLog(LLDBLog::Types), "Turning off implicit modules");
+    // Swift.
+    if (auto *module_interface_loader =
+            m_swift_ast_ctx.GetModuleInterfaceLoader()) {
+      auto &opts = module_interface_loader->getOptions();
+      // Turning this on would change the Clang module hash, which
+      // results in a "precompiled file '$HASH1/A.pcm' was compiled
+      // with module cache path '$HASH2', but the path is currently
+      // '$HASH1" when manually importing more modules.
+      opts.disableImplicitSwiftModule = false;
+      opts.disableBuildingInterface = true;
+    }
+    // Clang.
+    if (auto *clangimporter = m_swift_ast_ctx.GetClangImporter()) {
+      auto &clang_instance = const_cast<clang::CompilerInstance &>(
+          clangimporter->getClangInstance());
+      clang_instance.getLangOpts().ImplicitModules = false;
+    }
+  }
+ 
+  ~DisableImplicitImportsRAII() {
+    const std::string &m_description = m_swift_ast_ctx.GetDescription();
+    if (!m_swift_ast_ctx.ImplicitModulesDisabled())
+      return;
+    m_swift_ast_ctx.SetImplicitModulesDisabled(false);
+    LOG_PRINTF(GetLog(LLDBLog::Types), "Turning on implicit modules");
+    if (auto *module_interface_loader =
+            m_swift_ast_ctx.GetModuleInterfaceLoader()) {
+      auto &opts = module_interface_loader->getOptions();
+      opts.disableImplicitSwiftModule = false;
+      opts.disableBuildingInterface = false;
+    }
+    if (auto *clangimporter = m_swift_ast_ctx.GetClangImporter()) {
+      auto &clang_instance = const_cast<clang::CompilerInstance &>(
+          clangimporter->getClangInstance());
+      clang_instance.getLangOpts().ImplicitModules = true;
+    }
+  }
+
+private:
+  SwiftASTContext &m_swift_ast_ctx;
+};
+}
+
 ThreadSafeASTContext SwiftASTContext::GetASTContext() {
   assert(m_initialized_search_path_options &&
          m_initialized_clang_importer_options &&
@@ -3904,43 +3966,6 @@ ThreadSafeASTContext SwiftASTContext::GetASTContext() {
     GetDiagnosticEngine().addConsumer(*new swift::PrintingDiagnosticConsumer());
   }
 
-  // Create the ClangImporter and determine the Clang module cache path.
-  std::string moduleCachePath =
-      GetCompilerInvocation().getClangModuleCachePath().str();
-  std::unique_ptr<swift::ClangImporter> clang_importer_up;
-  if (!m_ast_context_up->SearchPathOpts.getSDKPath().empty() ||
-      TargetHasNoSDK()) {
-    // Create the DWARFImporterDelegate.
-    const auto &props = ModuleList::GetGlobalModuleListProperties();
-    if (props.GetUseSwiftDWARFImporter())
-      m_dwarfimporter_delegate_up =
-          std::make_unique<SwiftDWARFImporterDelegate>(*this);
-    auto importer_diags = getScopedDiagnosticConsumer();
-    clang_importer_up = swift::ClangImporter::create(
-        *m_ast_context_up, &GetCompilerInvocation().getIRGenOptions(),
-        "", m_dependency_tracker.get(), m_dwarfimporter_delegate_up.get());
-
-    // Handle any errors.
-    if (!clang_importer_up || importer_diags->HasErrors()) {
-      AddDiagnostic(eSeverityError, "failed to create ClangImporter");
-      if (GetLog(LLDBLog::Types)) {
-        DiagnosticManager diagnostic_manager;
-        importer_diags->PrintDiagnostics(diagnostic_manager);
-        std::string underlying_error = diagnostic_manager.GetString();
-        HEALTH_LOG_PRINTF("failed to initialize ClangImporter: %s",
-                          underlying_error.c_str());
-      }
-    }
-    if (clang_importer_up) {
-      auto clangModuleCache = swift::getModuleCachePathFromClang(
-          clang_importer_up->getClangInstance());
-      if (!clangModuleCache.empty())
-        moduleCachePath = clangModuleCache;
-    }
-  }
-  LOG_PRINTF(GetLog(LLDBLog::Types), "Using Clang module cache path: %s",
-             moduleCachePath.c_str());
-
   // Compute the prebuilt module cache path to use:
   // <resource-dir>/<platform>/prebuilt-modules/<version>
   llvm::Triple triple(GetTriple());
@@ -3956,6 +3981,8 @@ ThreadSafeASTContext SwiftASTContext::GetASTContext() {
     } else
       llvm::consumeError(SDKInfoOrErr.takeError());
   }
+  std::string moduleCachePath =
+      GetCompilerInvocation().getClangModuleCachePath().str();
   std::string prebuiltModuleCachePath =
       swift::CompilerInvocation::computePrebuiltCachePath(
           HostInfo::GetSwiftResourceDir(triple, GetPlatformSDKPath()), triple,
@@ -4067,6 +4094,42 @@ ThreadSafeASTContext SwiftASTContext::GetASTContext() {
     m_ast_context_up->addModuleLoader(std::move(serialized_module_loader_up));
 
   // 5. Install the clang importer.
+  // Create the ClangImporter and determine the Clang module cache path.
+  std::unique_ptr<swift::ClangImporter> clang_importer_up;
+  if (!m_ast_context_up->SearchPathOpts.getSDKPath().empty() ||
+      TargetHasNoSDK()) {
+    // Create the DWARFImporterDelegate.
+    const auto &props = ModuleList::GetGlobalModuleListProperties();
+    if (props.GetUseSwiftDWARFImporter())
+      m_dwarfimporter_delegate_up =
+          std::make_unique<SwiftDWARFImporterDelegate>(*this);
+    auto importer_diags = getScopedDiagnosticConsumer();
+    DisableImplicitImportsRAII(*this);
+    clang_importer_up = swift::ClangImporter::create(
+        *m_ast_context_up, &GetCompilerInvocation().getIRGenOptions(),
+        "", m_dependency_tracker.get(), m_dwarfimporter_delegate_up.get());
+
+    // Handle any errors.
+    if (!clang_importer_up || importer_diags->HasErrors()) {
+      AddDiagnostic(eSeverityError, "failed to create ClangImporter");
+      if (GetLog(LLDBLog::Types)) {
+        DiagnosticManager diagnostic_manager;
+        importer_diags->PrintDiagnostics(diagnostic_manager);
+        std::string underlying_error = diagnostic_manager.GetString();
+        HEALTH_LOG_PRINTF("failed to initialize ClangImporter: %s",
+                          underlying_error.c_str());
+      }
+    }
+    if (clang_importer_up) {
+      auto clangModuleCache = swift::getModuleCachePathFromClang(
+          clang_importer_up->getClangInstance());
+      if (!clangModuleCache.empty())
+        moduleCachePath = clangModuleCache;
+    }
+  }
+  LOG_PRINTF(GetLog(LLDBLog::Types), "Using Clang module cache path: %s",
+             moduleCachePath.c_str());
+
   if (clang_importer_up) {
     m_clangimporter = (swift::ClangImporter *)clang_importer_up.get();
     m_ast_context_up->addModuleLoader(std::move(clang_importer_up),
@@ -4107,13 +4170,6 @@ SwiftASTContext::GetMemoryBufferModuleLoader() {
 
   GetASTContext();
   return m_memory_buffer_module_loader;
-}
-
-swift::ClangImporter *SwiftASTContext::GetClangImporter() {
-  VALID_OR_RETURN(nullptr);
-
-  GetASTContext();
-  return m_clangimporter;
 }
 
 const std::vector<std::string> &SwiftASTContext::GetClangArguments() {
@@ -9648,46 +9704,7 @@ llvm::Error SwiftASTContext::GetCompileUnitImportsImpl(
     llvm::SmallVectorImpl<swift::AttributedImport<swift::ImportedModule>>
         *modules) {
   // If EBM is enabled, disable implicit modules during contextual imports.
-  m_implicit_modules_disabled =
-      m_has_explicit_modules &&
-      !Target::GetGlobalProperties().GetSwiftAllowImplicitModules();
-
-  auto reset = llvm::make_scope_exit([&] {
-    if (!m_implicit_modules_disabled)
-      return;
-    m_implicit_modules_disabled = false;
-    LOG_PRINTF(GetLog(LLDBLog::Types), "Turning on implicit modules");
-    if (m_module_interface_loader) {
-      auto &opts = m_module_interface_loader->getOptions();
-      opts.disableImplicitSwiftModule = false;
-      opts.disableBuildingInterface = false;
-    }
-    if (m_clangimporter) {
-      auto &clang_instance = const_cast<clang::CompilerInstance &>(
-          m_clangimporter->getClangInstance());
-      clang_instance.getLangOpts().ImplicitModules = true;
-    }
-  });
-  if (m_implicit_modules_disabled) {
-    LOG_PRINTF(GetLog(LLDBLog::Types), "Turning off implicit modules");
-    // Swift.
-    if (m_module_interface_loader) {
-      auto &opts = m_module_interface_loader->getOptions();
-      // Turning this on would change the Clang module hash, which
-      // results in a "precompiled file '$HASH1/A.pcm' was compiled
-      // with module cache path '$HASH2', but the path is currently
-      // '$HASH1" when manually importing more modules.
-      opts.disableImplicitSwiftModule = false;
-      opts.disableBuildingInterface = true;
-    }
-    // Clang.
-    if (m_clangimporter) {
-      auto &clang_instance = const_cast<clang::CompilerInstance &>(
-          m_clangimporter->getClangInstance());
-      clang_instance.getLangOpts().ImplicitModules = false;
-    }
-  }
-
+  DisableImplicitImportsRAII no_implicit_imports_raii(*this);
   CompileUnit *compile_unit = sc.comp_unit;
   if (compile_unit && compile_unit->GetModule())
     // Check the cache if this compile unit's imports were previously
