@@ -1280,17 +1280,15 @@ static std::optional<bool> UsesCC1Options(const swift::ClangImporterOptions &opt
 /// Retrieve the serialized AST data blobs and initialize the compiler
 /// invocation with the concatenated search paths from the blobs.
 /// \returns true if an error was encountered.
-static bool DeserializeAllCompilerFlags(swift::CompilerInvocation &invocation,
-                                        llvm::StringRef module_name,
-                                        llvm::StringRef module_filter,
-                                        llvm::ArrayRef<StringRef> buffers,
-                                        const PathMappingList &path_map,
-                                        bool discover_implicit_search_paths,
-                                        const std::string &m_description,
-                                        llvm::raw_ostream &error,
-                                        bool &got_serialized_options,
-                                        bool &found_swift_modules,
-                                        bool search_paths_only = false) {
+static bool DeserializeAllCompilerFlags(
+    swift::CompilerInvocation &invocation, llvm::StringRef module_name,
+    llvm::StringRef module_filter, llvm::ArrayRef<StringRef> buffers,
+    const PathMappingList &path_map, bool discover_implicit_search_paths,
+    const std::string &m_description, llvm::raw_ostream &error,
+    bool &got_serialized_options, bool &found_swift_modules,
+    bool search_paths_only = false,
+    swift::ExplicitSwiftModuleMap *explicit_swift_module_map = nullptr,
+    swift::ExplicitClangModuleMap *explicit_clang_module_map = nullptr) {
   bool found_validation_errors = false;
   got_serialized_options = false;
 
@@ -1376,7 +1374,8 @@ static bool DeserializeAllCompilerFlags(swift::CompilerInvocation &invocation,
       info = swift::serialization::validateSerializedAST(
           buf,
           /*requiredSDK*/ StringRef(), &extended_validation_info,
-          /*dependencies*/ nullptr, &searchPaths);
+          /*dependencies*/ nullptr, &searchPaths, explicit_swift_module_map,
+          explicit_clang_module_map);
       bool invalid_ast = info.status != swift::serialization::Status::Valid;
       bool invalid_size = (info.bytes == 0) || (info.bytes > buf.size());
       bool invalid_name = info.name.empty();
@@ -1572,7 +1571,6 @@ static bool DeserializeAllCompilerFlags(swift::CompilerInvocation &invocation,
           }
           llvm_unreachable("unhandled plugin search option kind");
         }
-
         return true;
       };
 
@@ -2874,7 +2872,7 @@ bool SwiftASTContext::DiscoverExplicitMainModule(const SymbolContext &sc,
                    "Could not open {1}: {0}", module.search_path);
     return false;
   }
-  LOG_PRINTF(GetLog(LLDBLog::Types), "Found main module %s",
+  LOG_PRINTF(GetLog(LLDBLog::Types), "Discovered main module %s",
              module.search_path.GetString().c_str());
 
   bool discover_implicit_search_paths = false;
@@ -2887,21 +2885,36 @@ bool SwiftASTContext::DiscoverExplicitMainModule(const SymbolContext &sc,
   if (module.path.size())
     module_name = module.path.front();
   swift::CompilerInvocation fresh_invocation;
+  m_main_swift_module = module.search_path;
+  m_main_swift_module_map = std::make_unique<swift::ExplicitSwiftModuleMap>();
+  m_main_swift_module_map->insert(
+      {module_name, swift::ExplicitSwiftModuleInputInfo{
+                        (std::string)module.search_path, {}, {}, {}, {}}});
+  m_explicit_swift_module_map =
+      std::make_unique<swift::ExplicitSwiftModuleMap>();
+  m_explicit_clang_module_map =
+      std::make_unique<swift::ExplicitClangModuleMap>();
   bool found_errors = DeserializeAllCompilerFlags(
       fresh_invocation, module_name, {}, {(*buffer)->getBuffer()},
       image.GetSourceMappingList(), discover_implicit_search_paths,
       m_description, errs, got_serialized_options, found_swift_modules,
-      /*search_paths_only = */ false);
+      /*search_paths_only=*/false, m_explicit_swift_module_map.get(),
+      m_explicit_clang_module_map.get());
   if (found_errors || !error.empty()) {
     AddDiagnostic(eSeverityError, errs.str());
     return false;
   }
-  auto &deserialized_clang_args =
-      fresh_invocation.getClangImporterOptions().ExtraArgs;
-  auto &invocation_clang_args = GetClangImporterOptions().ExtraArgs;
-  invocation_clang_args.insert(invocation_clang_args.end(),
-                               deserialized_clang_args.begin(),
-                               deserialized_clang_args.end());
+
+  std::vector<std::pair<std::string, bool>> module_search_paths;
+  std::vector<std::pair<std::string, bool>> framework_search_paths;
+  for (auto &path :
+       fresh_invocation.getSearchPathOptions().getImportSearchPaths())
+    module_search_paths.push_back({path.Path, path.IsSystem});
+  for (auto &path :
+       fresh_invocation.getSearchPathOptions().getFrameworkSearchPaths())
+    module_search_paths.push_back({path.Path, path.IsSystem});
+  AddExtraClangArgs(fresh_invocation.getClangImporterOptions().ExtraArgs,
+                    module_search_paths, framework_search_paths);
   return true;
 }
 
@@ -3882,17 +3895,13 @@ void SwiftASTContext::AddFrameworkSearchPaths(
   invocation.computeCXXStdlibOptions();
 }
 
-std::optional<clang::DarwinSDKInfo> &SwiftASTContext::GetSDKInfo() {
-  return GetCompilerInvocation().getSDKInfo();
-}
-
 namespace {
 /// RAII object to temporarily disable implicit module imports during
 /// context imports or while importing a bridging PCH.
 class DisableImplicitImportsRAII {
 public:
   DisableImplicitImportsRAII(SwiftASTContext &swift_ast_ctx)
-      : m_swift_ast_ctx(swift_ast_ctx) {
+    : m_swift_ast_ctx(swift_ast_ctx) {
     const std::string &m_description = m_swift_ast_ctx.GetDescription();
     bool disable =
         m_swift_ast_ctx.HasExplicitModules() &&
@@ -3917,6 +3926,9 @@ public:
       auto &clang_instance = const_cast<clang::CompilerInstance &>(
           clangimporter->getClangInstance());
       clang_instance.getLangOpts().ImplicitModules = false;
+
+      // DWARF.
+      clangimporter->setDWARFImporterDelegate(nullptr);
     }
   }
  
@@ -3936,6 +3948,8 @@ public:
       auto &clang_instance = const_cast<clang::CompilerInstance &>(
           clangimporter->getClangInstance());
       clang_instance.getLangOpts().ImplicitModules = true;
+      clangimporter->setDWARFImporterDelegate(
+          m_swift_ast_ctx.GetDWARFImporterDelegate());
     }
   }
 
@@ -4032,7 +4046,9 @@ ThreadSafeASTContext SwiftASTContext::GetASTContext() {
             m_dependency_tracker.get(), loading_mode,
             search_path_opts.ExplicitSwiftModuleMapPath,
             search_path_opts.ExplicitSwiftModuleInputs,
-            /*IgnoreSwiftSourceInfo*/ false);
+            /*IgnoreSwiftSourceInfo*/ false, std::move(m_main_swift_module_map),
+            std::move(m_explicit_swift_module_map),
+            std::move(m_explicit_clang_module_map));
     if (esml_up) {
       m_explicit_swift_module_loader =
           static_cast<LLDBExplicitSwiftModuleLoader *>(esml_up.get());
@@ -4099,6 +4115,11 @@ ThreadSafeASTContext SwiftASTContext::GetASTContext() {
   std::unique_ptr<swift::ClangImporter> clang_importer_up;
   if (!m_ast_context_up->SearchPathOpts.getSDKPath().empty() ||
       TargetHasNoSDK()) {
+    auto importer_diags = getScopedDiagnosticConsumer();
+    DisableImplicitImportsRAII(*this);
+    clang_importer_up = swift::ClangImporter::create(
+        *m_ast_context_up, &GetCompilerInvocation().getIRGenOptions(),
+        "", m_dependency_tracker.get(), m_dwarfimporter_delegate_up.get());
     // Create the DWARFImporterDelegate.
     //
     // Unless in EBM mode. DWARFImporter aggressively "finds" every
@@ -4106,14 +4127,11 @@ ThreadSafeASTContext SwiftASTContext::GetASTContext() {
     // exactly all non-fatal module-import errors. For example Swift
     // overlays may fail to import without consequences.
     const auto &props = ModuleList::GetGlobalModuleListProperties();
-    if (props.GetUseSwiftDWARFImporter() && !m_has_explicit_modules)
+    if (props.GetUseSwiftDWARFImporter())
       m_dwarfimporter_delegate_up =
           std::make_unique<SwiftDWARFImporterDelegate>(*this);
-    auto importer_diags = getScopedDiagnosticConsumer();
-    DisableImplicitImportsRAII(*this);
-    clang_importer_up = swift::ClangImporter::create(
-        *m_ast_context_up, &GetCompilerInvocation().getIRGenOptions(),
-        "", m_dependency_tracker.get(), m_dwarfimporter_delegate_up.get());
+    clang_importer_up->setDWARFImporterDelegate(
+        m_dwarfimporter_delegate_up.get());
 
     // Handle any errors.
     if (!clang_importer_up || importer_diags->HasErrors()) {
@@ -5873,6 +5891,9 @@ void SwiftASTContext::LogConfiguration(bool repl, bool playground) {
     HEALTH_LOG_PRINTF("  (no AST context)");
     return;
   }
+  if (m_main_swift_module)
+    HEALTH_LOG_PRINTF("  Main module                      : %s",
+                      m_main_swift_module.AsCString());
   if (repl)
     HEALTH_LOG_PRINTF("  REPL                             : true");
   if (playground)
@@ -5927,14 +5948,25 @@ void SwiftASTContext::LogConfiguration(bool repl, bool playground) {
       GetClangImporterOptions();
 
   if (!clang_importer_options.BridgingHeader.empty())
-    HEALTH_LOG_PRINTF("  Bridging Header               : %s",
+    HEALTH_LOG_PRINTF("  Bridging Header                  : %s",
                       clang_importer_options.BridgingHeader.c_str());
   if (!clang_importer_options.BridgingHeaderPCH.empty())
-    HEALTH_LOG_PRINTF("  Bridging Header PCH           : %s",
+    HEALTH_LOG_PRINTF("  Bridging Header PCH              : %s",
                       clang_importer_options.BridgingHeaderPCH.c_str());
   if (auto *expr_ctx = llvm::dyn_cast<SwiftASTContextForExpressions>(this))
-    HEALTH_LOG_PRINTF("  Explicit modules              : %s",
+    HEALTH_LOG_PRINTF("  Explicit modules                 : %s",
                       expr_ctx->HasExplicitModules() ? "true" : "false");
+  const auto *esmm = ast_context->getExplicitSwiftModuleMap();
+  const auto *ecmm = ast_context->getExplicitClangModuleMap();
+  if (esmm && ecmm) {
+    HEALTH_LOG_PRINTF(
+        "  Explicit module map entries      : %d (Swift), %d (Clang)",
+        esmm->size(), ecmm->size());
+    for (auto &entry : *esmm)
+      HEALTH_LOG_PRINTF("    %s\t\t: %s", entry.getKey().str().c_str(),
+                        entry.getValue().modulePath.c_str());
+    // The loader already added all Clang entries to the ExtraArgs below.
+  }    
 
   HEALTH_LOG_PRINTF(
       "  Extra clang arguments            : (%llu items)",
@@ -9710,41 +9742,14 @@ llvm::Error SwiftASTContext::GetCompileUnitImportsImpl(
     std::vector<SourceModule> cu_imports = compile_unit->GetImportedModules();
     LOG_PRINTF(GetLog(LLDBLog::Types), "Importing dependencies of current CU");
 
-    // 1. Scan explicitly tracked modules.
     ThreadSafeASTContext ast = GetASTContext();
     if (!ast)
       return llvm::createStringError("invalid swift AST (nullptr)");
 
     std::string category = "Importing dependencies for ";
     category += compile_unit->GetPrimaryFile().GetFilename().GetString();
-    // Register explicitly tracked modules. This needs to be done in a
-    // first pass, because module imports are recursive and typically
-    // all dependencies are listed as imports in debug info.
-    for (const SourceModule &module : cu_imports) {
-      // Is this an explicitly specified explicit Swift module?
-      StringRef module_path = module.search_path.GetStringRef();
-      bool is_esml_module =
-          (module_path.ends_with(".swiftmodule") &&
-           FileSystem::Instance().Exists(FileSpec(module.search_path))) ||
-          IsModuleAvailableInCAS(module_path.str());
-      if (!is_esml_module) continue;
-        std::string path = module_path.str();
-        bool unloaded = false;
-        if (!m_explicit_swift_module_loader)
-          continue;
-        if (!module.path.size())
-          continue;
-        ConstString module_name = module.path.front();
-        ast->addExplicitModulePath(module_name, module.search_path.GetString());
-        if (auto *memory_loader = GetMemoryBufferModuleLoader())
-          unloaded = memory_loader->unregisterMemoryBuffer(module_name);
 
-        HEALTH_LOG_PRINTF("found explicitly tracked module \"%s\"%s",
-                          path.c_str(),
-                          unloaded ? "; replacing AST section module" : "");
-    }
-
-    // 2. Load binary modules.
+    // Load main module.
     auto module_import_progress_raii = GetModuleImportProgressRAII(category);
     // If EBM is enabled, disable implicit modules during contextual imports.
     DisableImplicitImportsRAII no_implicit_imports_raii(*this);
@@ -9771,6 +9776,7 @@ llvm::Error SwiftASTContext::GetCompileUnitImportsImpl(
 
       if (modules)
         modules->emplace_back(swift::ImportedModule(&*loaded_module));
+      break;      
     }
   }
 

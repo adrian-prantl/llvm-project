@@ -40,9 +40,12 @@ public:
   create(swift::ASTContext &ctx, std::shared_ptr<llvm::cas::ObjectStore> cas,
          std::shared_ptr<llvm::cas::ActionCache> action_cache,
          swift::DependencyTracker *tracker, swift::ModuleLoadingMode loadMode,
-         llvm::StringRef ExplicitSwiftModuleMap,
+         llvm::StringRef ExplicitSwiftModuleMapPath,
          const llvm::StringMap<std::string> &ExplicitSwiftModuleInputs,
-         bool IgnoreSwiftSourceInfoFile);
+         bool IgnoreSwiftSourceInfoFile,
+         std::unique_ptr<swift::ExplicitSwiftModuleMap> MainSwiftModuleMap,
+         std::unique_ptr<swift::ExplicitSwiftModuleMap> ExplicitSwiftModuleMap,
+         std::unique_ptr<swift::ExplicitClangModuleMap> ExplicitClangModuleMap);
 
   void collectVisibleTopLevelModuleNames(
       llvm::SmallVectorImpl<swift::Identifier> &names) const override;
@@ -76,7 +79,9 @@ public:
       llvm::SetVector<swift::AutoDiffConfig> &results) override;
 
   void verifyAllModules() override;
-  void addExplicitModulePath(llvm::StringRef name, std::string path) override;
+
+  swift::ExplicitSwiftModuleMap *getExplicitSwiftModuleMap() override;
+  swift::ExplicitClangModuleMap *getExplicitClangModuleMap() override;
 
 protected:
   std::shared_ptr<llvm::cas::ObjectStore> m_cas;

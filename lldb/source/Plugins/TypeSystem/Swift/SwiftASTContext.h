@@ -27,6 +27,7 @@
 #include "swift/AST/Import.h"
 #include "swift/AST/Module.h"
 #include "swift/Demangling/ManglingFlavor.h"
+#include "swift/Frontend/ModuleInterfaceLoader.h"
 #include "swift/Parse/ParseVersion.h"
 #include "swift/Serialization/SerializationOptions.h"
 #include "swift/SymbolGraphGen/SymbolGraphOptions.h"
@@ -39,21 +40,21 @@
 
 namespace swift {
 enum class IRGenDebugInfoLevel : unsigned;
+class CASOptions;
 class CanType;
 class DependencyTracker;
-struct ImplicitImportInfo;
 class IRGenOptions;
-class NominalTypeDecl;
-class SearchPathOptions;
-class SILModule;
-struct TBDGenOptions;
-class VarDecl;
-class ModuleDecl;
-class SourceFile;
-class CASOptions;
-struct PrintOptions;
 class MemoryBufferSerializedModuleLoader;
+class ModuleDecl;
 class ModuleInterfaceLoader;
+class NominalTypeDecl;
+class SILModule;
+class SearchPathOptions;
+class SourceFile;
+class VarDecl;
+struct ImplicitImportInfo;
+struct PrintOptions;
+struct TBDGenOptions;
 namespace Demangle {
 class Demangler;
 class Node;
@@ -491,6 +492,9 @@ public:
   CompilerType ImportType(CompilerType &type, Status &error);
 
   swift::ClangImporter *GetClangImporter() { return m_clangimporter; }
+  swift::DWARFImporterDelegate *GetDWARFImporterDelegate() {
+    return m_dwarfimporter_delegate_up.get();
+  }
 
   CompilerType
   CreateTupleType(const std::vector<TupleElement> &elements) override;
@@ -1001,6 +1005,10 @@ protected:
   swift::ModuleDecl *m_scratch_module = nullptr;
   std::unique_ptr<swift::Lowering::TypeConverter> m_sil_types_up;
   std::unique_ptr<swift::SILModule> m_sil_module_up;
+  ConstString m_main_swift_module;
+  std::unique_ptr<swift::ExplicitSwiftModuleMap> m_main_swift_module_map;
+  std::unique_ptr<swift::ExplicitSwiftModuleMap> m_explicit_swift_module_map;
+  std::unique_ptr<swift::ExplicitClangModuleMap> m_explicit_clang_module_map;
   /// Owned by the AST.
   swift::MemoryBufferSerializedModuleLoader *m_memory_buffer_module_loader =
       nullptr;

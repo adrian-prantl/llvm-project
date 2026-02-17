@@ -36,18 +36,30 @@ LLDBExplicitSwiftModuleLoader::create(
     swift::ASTContext &ctx, std::shared_ptr<llvm::cas::ObjectStore> cas,
     std::shared_ptr<llvm::cas::ActionCache> action_cache,
     swift::DependencyTracker *tracker, swift::ModuleLoadingMode loadMode,
-    llvm::StringRef ExplicitSwiftModuleMap,
+    llvm::StringRef ExplicitSwiftModuleMapPath,
     const llvm::StringMap<std::string> &ExplicitSwiftModuleInputs,
-    bool IgnoreSwiftSourceInfoFile) {
-  auto esml = swift::ExplicitSwiftModuleLoader::create(
-      ctx, tracker, loadMode, ExplicitSwiftModuleMap, ExplicitSwiftModuleInputs,
-      IgnoreSwiftSourceInfoFile);
+    bool IgnoreSwiftSourceInfoFile,
+    std::unique_ptr<swift::ExplicitSwiftModuleMap> MainSwiftModuleMap,
+    std::unique_ptr<swift::ExplicitSwiftModuleMap> ExplicitSwiftModuleMap,
+    std::unique_ptr<swift::ExplicitClangModuleMap> ExplicitClangModuleMap) {
+  if (!MainSwiftModuleMap || !ExplicitSwiftModuleMap || !ExplicitClangModuleMap)
+    return {};
   std::unique_ptr<swift::ExplicitCASModuleLoader> casml;
   if (cas && action_cache) {
     casml = swift::ExplicitCASModuleLoader::create(
-        ctx, *cas, *action_cache, tracker, loadMode, ExplicitSwiftModuleMap,
-        ExplicitSwiftModuleInputs, IgnoreSwiftSourceInfoFile);
+        ctx, *cas, *action_cache, tracker, loadMode, ExplicitSwiftModuleMapPath,
+        ExplicitSwiftModuleInputs, IgnoreSwiftSourceInfoFile,
+        std::move(ExplicitSwiftModuleMap), std::move(ExplicitClangModuleMap));
   }
+  if (!ExplicitSwiftModuleMap)
+    ExplicitSwiftModuleMap = std::move(MainSwiftModuleMap);
+  else
+    for (auto &entry : *MainSwiftModuleMap)
+      ExplicitSwiftModuleMap->insert({entry.getKey(), entry.getValue()});
+  auto esml = swift::ExplicitSwiftModuleLoader::create(
+      ctx, tracker, loadMode, ExplicitSwiftModuleMapPath,
+      ExplicitSwiftModuleInputs, IgnoreSwiftSourceInfoFile,
+      std::move(ExplicitSwiftModuleMap), std::move(ExplicitClangModuleMap));
   return std::make_unique<LLDBExplicitSwiftModuleLoader>(
       ctx, cas, action_cache, tracker, loadMode, IgnoreSwiftSourceInfoFile,
       std::move(casml), std::move(esml));
@@ -128,60 +140,18 @@ void LLDBExplicitSwiftModuleLoader::verifyAllModules() {
   m_esml->verifyAllModules();
 }
 
-void LLDBExplicitSwiftModuleLoader::addExplicitModulePath(llvm::StringRef name,
-                                                          std::string path) {
-  // We trust module paths found in DWARF (= found first) over module
-  // paths deserialized from Swift modules. Under some curcumstances
-  // Swift modules could have been built elsewhere and injected into
-  // even an EBM build.
-  if (m_known_modules.count(name))
-    return;
+swift::ExplicitSwiftModuleMap *
+LLDBExplicitSwiftModuleLoader::getExplicitSwiftModuleMap() {
+  if (m_casml)
+    return m_casml->getExplicitSwiftModuleMap();
+  return m_esml->getExplicitSwiftModuleMap();
+}
 
-  // CAS.  
-  if (m_cas && m_casml) {
-    llvm::Expected<llvm::cas::CASID> parsed_id = m_cas->parseID(path);
-    if (parsed_id) {
-      llvm::Expected<std::optional<llvm::cas::CASID>> lookup =
-          m_action_cache->get(*parsed_id);
-      if (!lookup)
-        LLDB_LOG_ERROR(GetLog(LLDBLog::Types), lookup.takeError(),
-                       "ignoring unavailable explicitly tracked module \"{1}\" "
-                       "at CAS id \"{2}\", error: {0}",
-                       name, path);
-      if (!*lookup) {
-        LLDB_LOG(GetLog(LLDBLog::Types),
-                 "ignoring unavailable explicitly tracked module \"{0}\" at "
-                 "CAS id \"{1}\"",
-                 name, path);
-        return;
-      }
-      // Found in CAS.
-      LLDB_LOG(GetLog(LLDBLog::Types),
-               "discovered explicitly tracked module \"{0}\" at CAS id \"{1}\"",
-               name, path);
-      m_known_modules.insert(name);
-      m_casml->addExplicitModulePath(name, path);
-      return;
-    }
-    // Not a CAS URL.    
-    llvm::consumeError(parsed_id.takeError());
-  }
-
-  // Filesystem.
-  if (!llvm::sys::fs::exists(path)) {
-    LLDB_LOG(
-        GetLog(LLDBLog::Types),
-        "ignoring unavailable explicitly tracked module \"{0}\" at \"{1}\"",
-        name, path);
-    return;
-  }
-
-  // Found on disk..  
-  LLDB_LOG(GetLog(LLDBLog::Types),
-           "discovered explicitly tracked module \"{0}\" at \"{1}\"", name,
-           path);
-  m_known_modules.insert(name);
-  m_esml->addExplicitModulePath(name, path);
+swift::ExplicitClangModuleMap *
+LLDBExplicitSwiftModuleLoader::getExplicitClangModuleMap() {
+  if (m_casml)
+    return m_casml->getExplicitClangModuleMap();
+  return m_esml->getExplicitClangModuleMap();
 }
 
 } // namespace lldb_private
