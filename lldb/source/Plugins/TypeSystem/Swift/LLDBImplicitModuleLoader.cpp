@@ -75,6 +75,19 @@ void LLDBImplicitSwiftModuleLoader::collectVisibleTopLevelModuleNames(
     m_isml->collectVisibleTopLevelModuleNames(names);
 }
 
+bool LLDBImplicitSwiftModuleLoader::findModule(
+    swift::ImportPath::Element moduleID,
+    llvm::SmallVectorImpl<char> *moduleInterfacePath,
+    llvm::SmallVectorImpl<char> *moduleInterfaceSourcePath,
+    std::unique_ptr<llvm::MemoryBuffer> *moduleBuffer,
+    std::unique_ptr<llvm::MemoryBuffer> *moduleDocBuffer,
+    std::unique_ptr<llvm::MemoryBuffer> *moduleSourceInfoBuffer,
+    std::string *CacheKey, bool isCanImportLookup,
+    bool isTestableDependencyLookup, bool &isFramework, bool &isSystemModule) {
+  assert(false && "pass-through not implemented");
+  // This is a protected member and probably also not useful.
+  return false;
+}
 std::error_code LLDBImplicitSwiftModuleLoader::findModuleFilesInDirectory(
     swift::ImportPath::Element ModuleID,
     const swift::SerializedModuleBaseName &BaseName,
@@ -84,10 +97,10 @@ std::error_code LLDBImplicitSwiftModuleLoader::findModuleFilesInDirectory(
     std::unique_ptr<llvm::MemoryBuffer> *ModuleDocBuffer,
     std::unique_ptr<llvm::MemoryBuffer> *ModuleSourceInfoBuffer,
     bool IsCanImportLookup, bool IsFramework, bool IsTestableDependencyLookup) {
+  assert(false && "pass-through not implemented");
   // This is a protected member and probably also not useful.
   return {};
 }
-
 bool LLDBImplicitSwiftModuleLoader::canImportModule(
     swift::ImportPath::Module named, swift::SourceLoc loc,
     ModuleVersionInfo *versionInfo, bool isTestableImport) {

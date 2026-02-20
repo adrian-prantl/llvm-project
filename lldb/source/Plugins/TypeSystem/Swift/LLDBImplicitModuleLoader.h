@@ -37,6 +37,15 @@ public:
 
   void collectVisibleTopLevelModuleNames(
       llvm::SmallVectorImpl<swift::Identifier> &names) const override;
+  bool findModule(swift::ImportPath::Element moduleID,
+                  llvm::SmallVectorImpl<char> *moduleInterfacePath,
+                  llvm::SmallVectorImpl<char> *moduleInterfaceSourcePath,
+                  std::unique_ptr<llvm::MemoryBuffer> *moduleBuffer,
+                  std::unique_ptr<llvm::MemoryBuffer> *moduleDocBuffer,
+                  std::unique_ptr<llvm::MemoryBuffer> *moduleSourceInfoBuffer,
+                  std::string *CacheKey, bool isCanImportLookup,
+                  bool isTestableDependencyLookup, bool &isFramework,
+                  bool &isSystemModule) override;
   std::error_code findModuleFilesInDirectory(
       swift::ImportPath::Element ModuleID,
       const swift::SerializedModuleBaseName &BaseName,

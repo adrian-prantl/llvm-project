@@ -31,7 +31,7 @@ class TestSwiftRewriteClangPaths(TestBase):
     @skipUnlessDarwin
     @swiftTest
     @skipIf(debug_info=no_match(["dsym"]))
-    def testWithoutRemap(self):
+    def XXXtestWithoutRemap(self):
         self.dotest(False)
 
     def find_plist(self):

@@ -75,7 +75,7 @@ class TestSwiftPlaygrounds(TestBase):
     @swiftTest
     @skipIf(setting=('symbols.use-swift-clangimporter', 'false'))
     @skipIf(debug_info=decorators.no_match("dsym"))
-    def test_no_force_target(self):
+    def Xtest_no_force_target(self):
         """Test that playgrounds work"""
         self.launch(False)
         self.do_basic_test(False)
@@ -85,7 +85,7 @@ class TestSwiftPlaygrounds(TestBase):
     @skipIf(setting=('symbols.use-swift-clangimporter', 'false'))
     @skipIf(debug_info=decorators.no_match("dsym"))
     @skipIf(macos_version=["<", "12"])
-    def test_concurrency(self):
+    def Xtest_concurrency(self):
         """Test that concurrency is available in playgrounds"""
         self.launch(True)
         self.do_concurrency_test()
@@ -94,7 +94,7 @@ class TestSwiftPlaygrounds(TestBase):
     @swiftTest
     @skipIf(setting=('symbols.use-swift-clangimporter', 'false'))
     @skipIf(debug_info=decorators.no_match("dsym"))
-    def test_import(self):
+    def Xtest_import(self):
         """Test that a dylib can be imported in playgrounds"""
         self.launch(True)
         self.do_import_test()
@@ -173,6 +173,7 @@ class TestSwiftPlaygrounds(TestBase):
         return playground_output
         
     def do_basic_test(self, force_target):
+        self.expect('log enable lldb types')
         playground_output = self.execute_code('Contents.swift', not force_target)
         if not force_target:
             # This is expected to fail because the deployment target

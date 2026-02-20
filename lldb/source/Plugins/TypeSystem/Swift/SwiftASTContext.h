@@ -1008,7 +1008,7 @@ protected:
   ConstString m_main_swift_module;
   std::unique_ptr<swift::ExplicitSwiftModuleMap> m_main_swift_module_map;
   std::unique_ptr<swift::ExplicitSwiftModuleMap> m_explicit_swift_module_map;
-  std::unique_ptr<swift::ExplicitClangModuleMap> m_explicit_clang_module_map;
+  std::unique_ptr<swift::ExplicitClangModuleMap> m_explicit_clang_module_map;  
   /// Owned by the AST.
   swift::MemoryBufferSerializedModuleLoader *m_memory_buffer_module_loader =
       nullptr;
