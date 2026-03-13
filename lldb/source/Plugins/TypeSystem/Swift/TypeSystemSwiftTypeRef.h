@@ -52,6 +52,7 @@ class ClangNameImporter;
 class SwiftASTContext;
 class SwiftASTContextForExpressions;
 class SwiftDWARFImporterForClangTypes;
+class SwiftLanguageRuntime;
 class SwiftPersistentExpressionState;
 
 /// A Swift TypeSystem that does not own a swift::ASTContext.
@@ -497,6 +498,18 @@ public:
   CompilerType Canonicalize(CompilerType type);
 
 protected:
+  /// An temporary object that holds the process alive.  
+  struct SwiftLanguageRuntimeHolder {
+    lldb::ProcessSP process_sp;
+    SwiftLanguageRuntime *runtime;
+
+    operator bool() const { return runtime; }
+    SwiftLanguageRuntime *operator->() { return runtime; }
+  };    
+  /// Get the SwiftLanguageRuntime, only returns something for
+  /// TypeSystemSwiftTyperefForExpression.
+  SwiftLanguageRuntimeHolder GetRuntime();
+
   /// Determine whether the fallback is enabled via setting.
   bool UseSwiftASTContextFallback(const char *func_name,
                                   lldb::opaque_compiler_type_t type);

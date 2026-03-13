@@ -37,6 +37,7 @@
 #include "llvm/Support/Error.h"
 
 #include "lldb/lldb-enumerations.h"
+#include "lldb/lldb-forward.h"
 #include "swift/AST/ASTContext.h"
 #include "swift/AST/ASTMangler.h"
 #include "swift/AST/ASTWalker.h"
@@ -1685,20 +1686,14 @@ llvm::Expected<std::string> SwiftLanguageRuntime::GetEnumCaseName(
 
 llvm::Expected<ValueObjectSP>
 SwiftLanguageRuntime::ProjectEnum(ValueObject &valobj) {
-  TypeSystemSwiftTypeRefSP ts_sp;
-  if (auto target_sp = valobj.GetTargetSP()) {
-    auto type_system_or_err =
-        target_sp->GetScratchTypeSystemForLanguage(lldb::eLanguageTypeSwift);
-    if (!type_system_or_err)
-      return type_system_or_err.takeError();
-    auto ts_ptr = type_system_or_err->get();
-    ts_sp = llvm::cast<TypeSystemSwift>(ts_ptr)->GetTypeSystemSwiftTypeRef();
-  }
-  if (!ts_sp)
-    return llvm::createStringError("no target");
-  auto &ts = *ts_sp;
   auto exe_ctx = valobj.GetExecutionContextRef().Lock(true);
   CompilerType enum_type = valobj.GetCompilerType();
+
+  auto ts_sp = enum_type.GetTypeSystem()
+                .dyn_cast_or_null<TypeSystemSwiftTypeRefForExpressions>();
+  if (!ts_sp)
+    return llvm::createStringError("not a dynamic Swift type");
+  auto &ts = *ts_sp;  
 
   auto ti_or_err = GetSwiftRuntimeTypeInfo(
       enum_type, exe_ctx.GetBestExecutionContextScope());
@@ -1725,7 +1720,8 @@ SwiftLanguageRuntime::ProjectEnum(ValueObject &valobj) {
     if (!payload_tr)
       return llvm::createStringError("no payload type for indirect case");
 
-    CompilerType payload_type = GetTypeFromTypeRef(ts, payload_tr, flavor);
+    CompilerType payload_type =
+        GetTypeFromTypeRef(ts, payload_tr, flavor);
     if (!payload_type)
       return llvm::createStringError("could not get payload type");
 
@@ -3110,6 +3106,10 @@ bool SwiftLanguageRuntime::GetDynamicTypeAndAddress_Value(
       bound_type.GetByteSize(exe_ctx.GetBestExecutionContextScope()));
   if (!size)
     return false;
+  if (in_value.GetValue().GetValueType() == Value::ValueType::Scalar) {
+    value_type = Value::ValueType::Scalar;
+    return true;
+  }
   auto [val_address, address_type] = in_value.GetAddressOf(true);
   // If we couldn't find a load address, but the value object has a local
   // buffer, use that.
@@ -3462,26 +3462,33 @@ bool SwiftLanguageRuntime::GetDynamicTypeAndAddress(
   if (use_dynamic == lldb::eNoDynamicValues)
     return false;
 
-  CompilerType val_type = in_value.GetCompilerType();
-
-  Value::ValueType static_value_type = Value::ValueType::Invalid;
+  auto hoist_type =
+      [&](CompilerType type) {
+        llvm::Expected<CompilerType> scratch_type =
+            GetScratchTypeSystemType(type, in_value.GetExecutionContextRef());
+        if (!scratch_type) {
+          LLDB_LOG_ERROR(GetLog(LLDBLog::Types), scratch_type.takeError(),
+                         "cannot import type into scratch typesystem: {0}");
+          return CompilerType();
+        }
+        return *scratch_type;
+      };
 
   // Hoist the type into a scratch typesystem.
-  auto hoist_type = [&](TypeAndOrName &class_type_or_name) {
-    return;
-    CompilerType type = class_type_or_name.GetCompilerType();
-    if (!type)
-      return;
-    llvm::Expected<CompilerType> scratch_type =
-        GetScratchTypeSystemType(type, in_value.GetExecutionContextRef());
-    if (!scratch_type) {
-      LLDB_LOG_ERROR(GetLog(LLDBLog::Types), scratch_type.takeError(),
-                     "cannot import type into scratch typesystem: {0}");
-      return;
-    }
-    class_type_or_name.SetCompilerType(*scratch_type);
-  };
+  auto hoist_result_type =
+      [&](TypeAndOrName &class_type_or_name) {
+        CompilerType type = class_type_or_name.GetCompilerType();
+        if (!type)
+          return;
+        CompilerType scratch_type = hoist_type(type);
+        if (!scratch_type)
+          return;
+        class_type_or_name.SetCompilerType(scratch_type);
+      };
 
+  CompilerType val_type = hoist_type(in_value.GetCompilerType());
+  Value::ValueType static_value_type = Value::ValueType::Invalid;
+  
   // Try to import a Clang type into Swift.
   if (in_value.GetObjectRuntimeLanguage() == eLanguageTypeObjC) {
     if (GetDynamicTypeAndAddress_ClangType(in_value, use_dynamic,
@@ -3491,7 +3498,7 @@ bool SwiftLanguageRuntime::GetDynamicTypeAndAddress(
     if (GetDynamicTypeAndAddress_Class(in_value, val_type, use_dynamic,
                                        class_type_or_name, address,
                                        static_value_type, local_buffer)) {
-      hoist_type(class_type_or_name);
+      hoist_result_type(class_type_or_name);
       return true;
     }
     return false;
@@ -3558,7 +3565,7 @@ bool SwiftLanguageRuntime::GetDynamicTypeAndAddress(
   }
 
   if (success) {
-    hoist_type(class_type_or_name);
+    hoist_result_type(class_type_or_name);
 
     // If we haven't found a better static value type, use the value object's
     // one.

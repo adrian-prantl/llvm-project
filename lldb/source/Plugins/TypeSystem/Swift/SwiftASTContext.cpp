@@ -6352,46 +6352,11 @@ bool SwiftASTContext::IsPossibleDynamicType(opaque_compiler_type_t type,
                                             bool check_objc) {
   VALID_OR_RETURN_CHECK_TYPE(type, false);
 
-  auto can_type = GetCanonicalSwiftType(type);
-  if (!can_type)
-    return false;
-
-  if (can_type->getClassOrBoundGenericClass() ||
-      can_type->isAnyExistentialType())
-    return true;
-
-  if (!IsImportedType(type) &&
-      (swift::isa<swift::EnumType>(can_type) ||
-       swift::isa<swift::BoundGenericEnumType>(can_type)))
-    return true;
-
-  // Dynamic Self types are resolved inside DoArchetypeBindingForType(),
-  // right before the actual archetype binding.
-  if (can_type->hasDynamicSelfType())
-    return true;
-
-  if (can_type->hasArchetype() || can_type->hasOpaqueArchetype() ||
-      can_type->hasTypeParameter())
-    return true;
-
-  if (can_type == GetASTContext()->TheRawPointerType)
-    return true;
-  if (can_type == GetASTContext()->TheNativeObjectType)
-    return true;
-  if (can_type == GetASTContext()->TheBridgeObjectType)
-    return true;
-
-  if (auto *bound_type =
-          llvm::dyn_cast<swift::BoundGenericType>(can_type.getPointer())) {
-    for (auto generic_arg : bound_type->getGenericArgs()) {
-      if (IsPossibleDynamicType(generic_arg.getPointer(), dynamic_pointee_type,
-                                check_cplusplus, check_objc))
-        return true;
-    }
-  }
-
   if (dynamic_pointee_type)
     dynamic_pointee_type->Clear();
+
+  Flags info = GetTypeInfo(type, nullptr);
+  return info.AllSet(eTypeIsSwift) && info.AllClear(eTypeIsScalar);
   return false;
 }
 

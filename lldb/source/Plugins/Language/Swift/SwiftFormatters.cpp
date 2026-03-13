@@ -1621,7 +1621,6 @@ lldb_private::formatters::swift::EnumSyntheticFrontEnd::Update() {
     return ChildCacheState::eRefetch;
   }
 
-  m_dynamic = m_backend.GetDynamicValueType();
   m_projected = *projected;
   if (m_projected &&
       m_projected->GetName().GetStringRef().starts_with("$indirect."))

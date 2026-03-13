@@ -2491,6 +2491,14 @@ const char *TypeSystemSwiftTypeRef::DeriveKeyFor(const SymbolContext &sc) {
   return nullptr;
 }
 
+TypeSystemSwiftTypeRef::SwiftLanguageRuntimeHolder
+TypeSystemSwiftTypeRef::GetRuntime() {
+  ProcessSP process_sp;
+  if (TargetSP target_sp = GetTargetWP().lock())
+    process_sp = target_sp->GetProcessSP();
+  return {process_sp, SwiftLanguageRuntime::Get(process_sp.get())};
+}
+
 SymbolContext TypeSystemSwiftTypeRef::GetSymbolContext(
     ExecutionContextScope *exe_scope) const {
   if (!exe_scope)
@@ -3609,71 +3617,9 @@ bool TypeSystemSwiftTypeRef::IsPossibleDynamicType(opaque_compiler_type_t type,
   if (!type)
     return false;
 
-  const char *mangled_name = AsMangledName(type);
-  auto flavor = SwiftLanguageRuntime::GetManglingFlavor(mangled_name);
-
   auto impl = [&]() {
-    using namespace swift::Demangle;
-    Demangler dem;
-    std::function<bool(NodePointer)> is_possible_dynamic =
-        [&](NodePointer node) -> bool {
-      if (!node)
-        return false;
-
-      if (node->getKind() == Node::Kind::TypeAlias) {
-        auto resolved = ResolveTypeAlias(dem, node, flavor);
-        if (auto *n = std::get<swift::Demangle::NodePointer>(resolved))
-          node = n;
-      }
-
-      switch (node->getKind()) {
-      case Node::Kind::Class:
-      case Node::Kind::BoundGenericClass:
-      case Node::Kind::ConstrainedExistential:
-      case Node::Kind::Protocol:
-      case Node::Kind::ProtocolList:
-      case Node::Kind::ProtocolListWithClass:
-      case Node::Kind::ProtocolListWithAnyObject:
-      case Node::Kind::ExistentialMetatype:
-      case Node::Kind::DynamicSelf:
-      case Node::Kind::OpaqueType:
-      case Node::Kind::Enum:
-      case Node::Kind::BoundGenericEnum:
-        return true;
-
-      case Node::Kind::BoundGenericStructure: {
-        if (node->getNumChildren() < 2)
-          return false;
-        NodePointer type_list = node->getLastChild();
-        if (type_list->getKind() != Node::Kind::TypeList)
-          return false;
-        for (NodePointer child : *type_list) {
-          if (child->getKind() == Node::Kind::Type) {
-            child = child->getFirstChild();
-            if (is_possible_dynamic(child))
-              return true;
-          }
-        }
-        return false;
-      }
-      case Node::Kind::ImplFunctionType:
-        return false;
-      case Node::Kind::BuiltinTypeName: {
-        if (!node->hasText())
-          return false;
-        StringRef name = node->getText();
-        return name == swift::BUILTIN_TYPE_NAME_RAWPOINTER ||
-               name == swift::BUILTIN_TYPE_NAME_NATIVEOBJECT ||
-               name == swift::BUILTIN_TYPE_NAME_BRIDGEOBJECT ||
-               name == swift::BUILTIN_TYPE_NAME_UNKNOWNOBJECT;
-      }
-      default:
-        return ContainsGenericTypeParameter(node);
-      }
-    };
-
-    auto *node = DemangleCanonicalType(dem, type);
-    return is_possible_dynamic(node);
+    Flags info = GetTypeInfo(type, nullptr);
+    return info.AllSet(eTypeIsSwift) && info.AllClear(eTypeIsScalar);
   };
   VALIDATE_AND_RETURN(
       impl, IsPossibleDynamicType, type, g_no_exe_ctx,
@@ -4078,8 +4024,8 @@ TypeSystemSwiftTypeRef::GetBitSize(opaque_compiler_type_t type,
           "Cannot compute size of type %s without an execution context.",
           AsMangledName(type));
     // The hot code path is to ask the Swift runtime for the size.
-    if (auto *runtime =
-            SwiftLanguageRuntime::Get(exe_scope->CalculateProcess())) {
+    auto runtime = GetRuntime();
+    if (runtime) {    
       auto result_or_err =
           runtime->GetBitSize({weak_from_this(), type}, exe_scope);
       if (result_or_err)
@@ -4117,6 +4063,14 @@ TypeSystemSwiftTypeRef::GetBitSize(opaque_compiler_type_t type,
     // static type in the debug info.
     if (auto static_size = get_static_size(false))
       return *static_size;
+
+    // We would really want to return "success, unknown size" here.
+    // Returning an error here will cause ValueObjectPrinter to not
+    // attempt dynamic type resolution, which will make the runtime
+    // available. Return 0 here to indicate success.
+    if (!runtime)
+      return 0;      
+
     return llvm::createStringError(
         "Cannot compute size of type %s using static debug info.",
         AsMangledName(type));
