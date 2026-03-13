@@ -290,6 +290,17 @@ public:
   };
   /// \}
 
+  /// Import a Swift type into a scratch typesystem
+  /// (TypeSystemSwiftTypeRefForExpressions). This works with all
+  /// types, but only makes sense for types in the per-module
+  /// TypeSystemSwiftTypeRef. In contrast to the per-module
+  /// (lldb_private::Module) typesystems the scratch typesystem is
+  /// bound to a process and can therefor answer queries that need
+  /// runtime information.
+  static llvm::Expected<CompilerType>
+  GetScratchTypeSystemType(CompilerType module_type,
+                           ExecutionContextRef exe_ctx_ref);
+
   bool GetDynamicTypeAndAddress(ValueObject &in_value,
                                 lldb::DynamicValueType use_dynamic,
                                 TypeAndOrName &class_type_or_name,

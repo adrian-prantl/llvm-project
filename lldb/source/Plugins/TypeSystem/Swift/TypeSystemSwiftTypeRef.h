@@ -714,6 +714,9 @@ public:
                                llvm::ArrayRef<CompilerContext> decl_context,
                                bool ignore_modules,
                                SymbolContext sc = {}) override;
+  /// Import type into this typesystem and register it in the fallback
+  /// sidetable.
+  CompilerType ImportType(CompilerType type, ExecutionContextRef exe_ctx);
 
   friend class SwiftASTContextForExpressions;
 protected:
@@ -736,6 +739,13 @@ protected:
   /// Map ConstString Clang type identifiers and the concatenation of the
   /// compiler context used to find them to Clang types.
   ThreadSafeStringMap<lldb::TypeSP> m_clang_type_cache;
+  /// In order to do a SwiftASTContext fallback, we need to have a
+  /// precise ExecutionContext to initalize the matching
+  /// SwiftASTContext. This information isn't part of CompilerType, so
+  /// this table keeps track of all types we imported into this
+  /// typesystem.
+  /// This can be removed when the fallback is removed.
+  ThreadSafeDenseMap<const char *, ExecutionContextRef> m_exectx_sidetable;
 };
 
 } // namespace lldb_private

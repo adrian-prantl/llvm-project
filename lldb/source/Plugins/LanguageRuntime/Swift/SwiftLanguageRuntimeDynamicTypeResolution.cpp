@@ -48,6 +48,7 @@
 #include "swift/RemoteInspection/TypeRefBuilder.h"
 #include "swift/Strings.h"
 
+#include <memory>
 #include <sstream>
 
 #define HEALTH_LOG(FMT, ...)                                                   \
@@ -3421,6 +3422,25 @@ bool SwiftLanguageRuntime::GetDynamicTypeAndAddress_ClangType(
   return true;
 }
 
+llvm::Expected<CompilerType> SwiftLanguageRuntime::GetScratchTypeSystemType(
+    CompilerType module_type, ExecutionContextRef exe_ctx_ref) {
+  // Hoist the type into the scratch typesystem (which knows about Process).
+  TypeSystemSwiftTypeRefForExpressionsSP ts;
+  TargetSP target_sp = exe_ctx_ref.GetTargetSP();
+  if (!target_sp)
+    return llvm::createStringError("no target");
+  auto type_system_or_err =
+      target_sp->GetScratchTypeSystemForLanguage(lldb::eLanguageTypeSwift);
+  if (!type_system_or_err)
+    return type_system_or_err.takeError();
+  auto ts_sp = *type_system_or_err;
+  if (!llvm::isa_and_nonnull<TypeSystemSwiftTypeRefForExpressions>(ts_sp.get()))
+    return llvm::createStringError("unexpected typesystem");
+
+  ts = std::static_pointer_cast<TypeSystemSwiftTypeRefForExpressions>(ts_sp);
+  return ts->ImportType(module_type, exe_ctx_ref);
+}
+
 static bool CouldHaveDynamicValue(ValueObject &in_value) {
   CompilerType var_type(in_value.GetCompilerType());
   Flags var_type_flags(var_type.GetTypeInfo());
@@ -3441,8 +3461,26 @@ bool SwiftLanguageRuntime::GetDynamicTypeAndAddress(
   class_type_or_name.Clear();
   if (use_dynamic == lldb::eNoDynamicValues)
     return false;
-  CompilerType val_type(in_value.GetCompilerType());
+
+  CompilerType val_type = in_value.GetCompilerType();
+
   Value::ValueType static_value_type = Value::ValueType::Invalid;
+
+  // Hoist the type into a scratch typesystem.
+  auto hoist_type = [&](TypeAndOrName &class_type_or_name) {
+    return;
+    CompilerType type = class_type_or_name.GetCompilerType();
+    if (!type)
+      return;
+    llvm::Expected<CompilerType> scratch_type =
+        GetScratchTypeSystemType(type, in_value.GetExecutionContextRef());
+    if (!scratch_type) {
+      LLDB_LOG_ERROR(GetLog(LLDBLog::Types), scratch_type.takeError(),
+                     "cannot import type into scratch typesystem: {0}");
+      return;
+    }
+    class_type_or_name.SetCompilerType(*scratch_type);
+  };
 
   // Try to import a Clang type into Swift.
   if (in_value.GetObjectRuntimeLanguage() == eLanguageTypeObjC) {
@@ -3450,9 +3488,13 @@ bool SwiftLanguageRuntime::GetDynamicTypeAndAddress(
                                            class_type_or_name, address,
                                            value_type, local_buffer))
       return true;
-    return GetDynamicTypeAndAddress_Class(in_value, val_type, use_dynamic,
-                                          class_type_or_name, address,
-                                          static_value_type, local_buffer);
+    if (GetDynamicTypeAndAddress_Class(in_value, val_type, use_dynamic,
+                                       class_type_or_name, address,
+                                       static_value_type, local_buffer)) {
+      hoist_type(class_type_or_name);
+      return true;
+    }
+    return false;
   }
 
   if (!CouldHaveDynamicValue(in_value))
@@ -3516,6 +3558,8 @@ bool SwiftLanguageRuntime::GetDynamicTypeAndAddress(
   }
 
   if (success) {
+    hoist_type(class_type_or_name);
+
     // If we haven't found a better static value type, use the value object's
     // one.
     if (static_value_type == Value::ValueType::Invalid)

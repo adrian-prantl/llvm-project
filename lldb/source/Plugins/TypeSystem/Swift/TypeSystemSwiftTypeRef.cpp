@@ -2644,6 +2644,16 @@ SwiftASTContextSP TypeSystemSwiftTypeRefForExpressions::GetSwiftASTContextOrNull
   return {};
 }
 
+CompilerType
+TypeSystemSwiftTypeRefForExpressions::ImportType(CompilerType type,
+                                                 ExecutionContextRef exe_ctx) {
+  ConstString mangled_name = type.GetMangledTypeName();
+  if (mangled_name.IsEmpty())
+    return {};
+  m_exectx_sidetable.Insert(mangled_name.AsCString(), exe_ctx);
+  return GetTypeFromMangledTypename(mangled_name);
+}
+
 SwiftDWARFImporterForClangTypes &
 TypeSystemSwiftTypeRef::GetSwiftDWARFImporterForClangTypes() {
   if (!m_dwarf_importer_for_clang_types_up)
