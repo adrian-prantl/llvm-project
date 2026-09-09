@@ -85,6 +85,14 @@ def assembly: Flag<["-", "--"], "S">,
   HelpText<"Output textual assembly instead of a binary dSYM companion file.">,
   Group<grp_general>;
 
+def emit_relocatable: F<"emit-relocatable">,
+  HelpText<"Emit a relocatable object file containing the linked DWARF and the "
+           "relocations needed to resolve its addresses, instead of a dSYM "
+           "companion file. The result stands in for the object files named by "
+           "the input's debug map, so it stays usable in a build that no longer "
+           "has them. Implies --flat.">,
+  Group<grp_general>;
+
 def symtab: F<"symtab">,
   HelpText<"Dumps the symbol table found in executable or object file(s) and exits.">,
   Group<grp_general>;

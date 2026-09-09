@@ -77,6 +77,12 @@ struct LinkOptions {
   dwarf_linker::DWARFLinkerBase::OutputFileType FileType =
       dwarf_linker::DWARFLinkerBase::OutputFileType::Object;
 
+  /// Emit a relocatable object file carrying the linked DWARF plus the
+  /// relocations needed to resolve its addresses, instead of a dSYM companion.
+  /// The result stands in for the object files the input's debug map names, so
+  /// it can be shipped to a build that no longer has them.
+  bool EmitRelocatableObject = false;
+
   /// The accelerator table kind
   DsymutilAccelTableKind TheAccelTableKind;
 

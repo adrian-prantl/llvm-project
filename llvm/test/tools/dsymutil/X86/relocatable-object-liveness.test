@@ -1,0 +1,16 @@
+# --emit-relocatable must still drop what the linker dropped. Relocations drive
+# liveness as well as address fixup, so a symbol missing from the debug map has
+# to lose its DIE rather than be emitted with a stale address.
+
+RUN: llvm-mc -triple x86_64-apple-darwin -filetype=obj \
+RUN:   %p/../Inputs/relocatable-object.s -o %t.o
+RUN: sed -e "s|@OBJ@|%/t.o|g" %p/../Inputs/relocatable-object-dead.map > %t.map
+RUN: dsymutil --linker classic --emit-relocatable -y %t.map -o %t.reloc.o
+
+RUN: llvm-dwarfdump --debug-info %t.reloc.o | FileCheck %s
+
+CHECK-NOT: "g_other"
+CHECK:     DW_AT_name{{.*}}"g_func"
+CHECK-NOT: "g_other"
+CHECK:     DW_AT_name{{.*}}"g_var"
+CHECK-NOT: "g_other"

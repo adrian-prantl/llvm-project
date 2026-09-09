@@ -8,7 +8,9 @@
 #ifndef LLVM_TOOLS_DSYMUTIL_MACHOUTILS_H
 #define LLVM_TOOLS_DSYMUTIL_MACHOUTILS_H
 
+#include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/BinaryFormat/MachO.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/VirtualFileSystem.h"
 
@@ -55,6 +57,24 @@ struct DwarfRelocationApplicationInfo {
 bool generateUniversalBinary(SmallVectorImpl<ArchAndFile> &ArchFiles,
                              StringRef OutputFileName, const LinkOptions &,
                              StringRef SDKPath, bool Fat64 = false);
+
+/// A relocation to attach to the emitted __debug_info. \p Offset is a byte
+/// offset into that section, and \p TargetAddress is the address the relocated
+/// field refers to, which selects the section the relocation names.
+struct DwarfRelocation {
+  uint64_t Offset;
+  uint64_t TargetAddress;
+  unsigned Size;
+};
+
+/// Write a relocatable object holding the input binary's sections and symbols
+/// plus the linked DWARF, so it stands in for the object files the debug map
+/// names. The passed \a MS must be writing Mach-O through a MachObjectWriter.
+bool generateRelocatableObject(
+    llvm::IntrusiveRefCntPtr<llvm::vfs::FileSystem> VFS, const DebugMap &DM,
+    MCStreamer &MS, raw_fd_ostream &OutFile,
+    ArrayRef<DwarfRelocation> DwarfRelocs);
+
 bool generateDsymCompanion(
     llvm::IntrusiveRefCntPtr<llvm::vfs::FileSystem> VFS, const DebugMap &DM,
     MCStreamer &MS, raw_fd_ostream &OutFile,

@@ -14,6 +14,7 @@ CHECK: -disallow <path>
 CHECK: -dump-debug-map
 CHECK: -D <path>
 CHECK: -embed-resource <src-path>=<bundle-relative-path>
+CHECK: -emit-relocatable
 CHECK: -fat64
 CHECK: -flat
 CHECK: -gen-reproducer

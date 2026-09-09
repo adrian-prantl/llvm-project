@@ -1,0 +1,59 @@
+# Check that --emit-relocatable produces a relocatable object standing in for
+# the object files the debug map names: the input's sections and symbols, plus
+# the linked DWARF with a relocation for every machine address.
+
+RUN: llvm-mc -triple x86_64-apple-darwin -filetype=obj \
+RUN:   %p/../Inputs/relocatable-object.s -o %t.o
+RUN: sed -e "s|@OBJ@|%/t.o|g" %p/../Inputs/relocatable-object.map > %t.map
+RUN: dsymutil --linker classic --emit-relocatable -y %t.map -o %t.reloc.o
+
+The output is an object file, not a dSYM companion.
+
+RUN: llvm-objdump --macho --private-headers %t.reloc.o \
+RUN:   | FileCheck %s --check-prefix=FILETYPE
+FILETYPE:      magic {{.*}} filetype
+FILETYPE-NEXT: MH_MAGIC_64 {{.*}} OBJECT
+
+It carries the input's sections as well as the DWARF, so it can replace the
+input in a link.
+
+RUN: llvm-objdump --section-headers %t.reloc.o | FileCheck %s --check-prefix=SECTS
+SECTS-DAG: __text
+SECTS-DAG: __data
+SECTS-DAG: __debug_info
+SECTS-DAG: __debug_line
+SECTS-DAG: __debug_abbrev
+
+Addresses in .debug_info are relocated against the section they fall in, which
+is how a compiler emits them, so the DWARF still reads correctly unrelocated.
+
+RUN: llvm-objdump -r --section=__debug_info %t.reloc.o \
+RUN:   | FileCheck %s --check-prefix=RELOCS
+RELOCS:     RELOCATION RECORDS FOR [__debug_info]:
+RELOCS-DAG: X86_64_RELOC_UNSIGNED    __text
+RELOCS-DAG: X86_64_RELOC_UNSIGNED    __data
+
+RUN: llvm-dwarfdump --verify %t.reloc.o | FileCheck %s --check-prefix=VERIFY
+VERIFY: No errors.
+
+RUN: llvm-dwarfdump --debug-info %t.reloc.o | FileCheck %s --check-prefix=DWARF
+DWARF-DAG: DW_AT_low_pc{{.*}}0x0000000000000000
+DWARF-DAG: DW_AT_low_pc{{.*}}0x0000000000000030
+DWARF-DAG: DW_AT_location{{.*}}DW_OP_addr 0x40
+DWARF-DAG: DW_AT_location{{.*}}DW_OP_addr 0x50
+
+The debug map is not carried over: the DWARF is in the object now, so a later
+consumer must not be sent looking for object files that need not exist.
+
+RUN: llvm-nm -a %t.reloc.o | FileCheck %s --check-prefix=SYMS
+SYMS-NOT: OSO
+SYMS-DAG: _g_func
+SYMS-DAG: _g_var
+
+Replacing the input's own __DWARF renumbers the sections after it, so anything
+still naming one by index has to be renumbered with them. llvm-readobj rejects
+a stale index outright, and _trailing_sym sits past the DWARF to have one.
+
+RUN: llvm-readobj --symbols %t.reloc.o | FileCheck %s --check-prefix=SECTIDX
+SECTIDX: Name: _trailing_sym
+SECTIDX: Section: __trailing

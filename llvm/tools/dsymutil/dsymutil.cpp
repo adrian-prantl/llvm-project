@@ -233,6 +233,26 @@ static Error verifyOptions(const DsymutilOptions &Options) {
         "--codesign is not supported with --no-output: nothing to sign",
         errc::invalid_argument);
 
+  if (Options.LinkOpts.EmitRelocatableObject) {
+    if (Options.LinkOpts.FileType == DWARFLinkerBase::OutputFileType::Assembly)
+      return make_error<StringError>(
+          "--emit-relocatable and -S are both output modes and cannot be "
+          "combined",
+          errc::invalid_argument);
+
+    if (Options.LinkOpts.Update)
+      return make_error<StringError>(
+          "--emit-relocatable is not supported with --update",
+          errc::invalid_argument);
+
+    // The relocations that describe the emitted DWARF are only recorded by the
+    // classic linker; see DwarfLinkerForBinaryRelocationMap.
+    if (Options.LinkOpts.DWARFLinkerType != DsymutilDWARFLinkerType::Classic)
+      return make_error<StringError>(
+          "--emit-relocatable currently requires --linker classic",
+          errc::invalid_argument);
+  }
+
   return Error::success();
 }
 
@@ -405,6 +425,12 @@ static Expected<DsymutilOptions> getOptions(opt::InputArgList &Args) {
 
   if (Args.hasArg(OPT_assembly))
     Options.LinkOpts.FileType = DWARFLinkerBase::OutputFileType::Assembly;
+
+  Options.LinkOpts.EmitRelocatableObject = Args.hasArg(OPT_emit_relocatable);
+  if (Options.LinkOpts.EmitRelocatableObject) {
+    // A relocatable object is a single file, so there is no bundle to build.
+    Options.Flat = true;
+  }
 
   if (opt::Arg *NumThreads = Args.getLastArg(OPT_threads))
     Options.LinkOpts.Threads = atoi(NumThreads->getValue());

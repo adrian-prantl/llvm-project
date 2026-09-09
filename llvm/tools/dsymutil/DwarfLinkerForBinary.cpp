@@ -998,8 +998,33 @@ bool DwarfLinkerForBinary::linkImpl(
     return error(toString(std::move(E)));
 
   auto MapTriple = Map.getTriple();
-  if ((MapTriple.isOSDarwin() || MapTriple.isOSBinFormatMachO()) &&
-      !Map.getBinaryPath().empty() &&
+  bool IsMachO = MapTriple.isOSDarwin() || MapTriple.isOSBinFormatMachO();
+
+  if (Options.EmitRelocatableObject && IsMachO && Streamer) {
+    if (Map.getBinaryPath().empty())
+      return error("--emit-relocatable needs the object the debug map "
+                   "describes, to carry its sections and symbols over");
+
+    // The linked addresses are addresses in the input object, so a relocation
+    // naming the section each one falls in keeps them correct once that
+    // section moves.
+    RelocationMap RM(MapTriple, Map.getBinaryPath());
+    for (auto &Obj : ObjectsForLinking)
+      if (Obj.OutRelocs->isInitialized())
+        Obj.OutRelocs->addValidRelocs(RM);
+
+    std::vector<MachOUtils::DwarfRelocation> DwarfRelocs;
+    for (const ValidReloc &Reloc : RM.relocations())
+      DwarfRelocs.push_back({Reloc.Offset,
+                             Reloc.SymbolMapping.BinaryAddress + Reloc.Addend,
+                             Reloc.Size});
+
+    return MachOUtils::generateRelocatableObject(
+        Options.VFS, Map, *Streamer->getAsmPrinter().OutStreamer, OutFile,
+        DwarfRelocs);
+  }
+
+  if (IsMachO && !Map.getBinaryPath().empty() &&
       ObjectType == Linker::OutputFileType::Object)
     return MachOUtils::generateDsymCompanion(
         Options.VFS, Map, *Streamer->getAsmPrinter().OutStreamer, OutFile,

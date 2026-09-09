@@ -1,0 +1,30 @@
+# The contract for --emit-relocatable: an object it produces can be fed back to
+# dsymutil as a debug map object, and every address lands where the new debug
+# map puts it. This is what proves the emitted relocations are encoded the way
+# dsymutil's own reader expects.
+
+RUN: llvm-mc -triple x86_64-apple-darwin -filetype=obj \
+RUN:   %p/../Inputs/relocatable-object.s -o %t.o
+RUN: sed -e "s|@OBJ@|%/t.o|g" %p/../Inputs/relocatable-object.map > %t.map
+RUN: dsymutil --linker classic --emit-relocatable -y %t.map -o %t.reloc.o
+
+Relink the relocatable object at completely different addresses.
+
+RUN: sed -e "s|@OBJ@|%/t.reloc.o|g" \
+RUN:   %p/../Inputs/relocatable-object-relink.map > %t.relink.map
+RUN: dsymutil --linker classic -f -y %t.relink.map -o %t.final.o
+
+RUN: llvm-dwarfdump --debug-info %t.final.o | FileCheck %s
+
+CHECK:     DW_TAG_subprogram
+CHECK:       DW_AT_low_pc{{.*}}0x0000000000005000
+CHECK:       DW_AT_name{{.*}}"g_func"
+CHECK:     DW_TAG_subprogram
+CHECK:       DW_AT_low_pc{{.*}}0x0000000000006000
+CHECK:       DW_AT_name{{.*}}"g_other"
+CHECK:     DW_TAG_variable
+CHECK:       DW_AT_name{{.*}}"g_var"
+CHECK:       DW_AT_location{{.*}}DW_OP_addr 0x7000
+CHECK:     DW_TAG_variable
+CHECK:       DW_AT_name{{.*}}"s_var"
+CHECK:       DW_AT_location{{.*}}DW_OP_addr 0x8000

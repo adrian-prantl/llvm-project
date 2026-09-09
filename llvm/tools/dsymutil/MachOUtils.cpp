@@ -682,6 +682,364 @@ bool generateDsymCompanion(
 
   return true;
 }
+
+// Copy \a Obj's symbol table, dropping the debug notes that make up its debug
+// map: the emitted object carries the DWARF itself, so leaving the notes behind
+// would send a later consumer looking for object files that need not exist.
+//
+// Relocations name symbols by index, so \a OldToNewSymIdx records where every
+// symbol moved. Undefined symbols are kept: a relocatable object is expected to
+// still reference things it does not define.
+//
+// \a OldToNewSectIdx maps the input's 1-based section numbers onto the
+// output's, which differ because the input's own __DWARF is replaced. A symbol
+// whose section is gone goes with it.
+static unsigned transferObjectSymbols(const object::MachOObjectFile &Obj,
+                                      SmallVectorImpl<char> &NewSymtab,
+                                      SmallVectorImpl<char> &NewStrings,
+                                      ArrayRef<uint32_t> OldToNewSectIdx,
+                                      std::vector<uint32_t> &OldToNewSymIdx) {
+  StringRef Strings = Obj.getStringTableData();
+  StringMap<uint32_t> StringOffsets;
+  bool InDebugNote = false;
+  unsigned NumSyms = 0;
+  unsigned OldIdx = 0;
+
+  // A Mach-O string table starts with an empty string.
+  NewStrings.push_back('\0');
+
+  for (const object::SymbolRef &Symbol : Obj.symbols()) {
+    object::DataRefImpl DRI = Symbol.getRawDataRefImpl();
+    MachO::nlist_64 NList = Obj.getSymbol64TableEntry(DRI);
+    OldToNewSymIdx[OldIdx++] = UINT32_MAX;
+
+    StringRef Name = StringRef(Strings.begin() + NList.n_strx);
+
+    // An N_SO with a filename opens a debug note and one without closes it.
+    if (InDebugNote) {
+      InDebugNote =
+          (NList.n_type != MachO::N_SO) || (!Name.empty() && Name[0] != '\0');
+      continue;
+    }
+    if (NList.n_type == MachO::N_SO) {
+      InDebugNote = true;
+      continue;
+    }
+    // Any other stab is debug-map machinery too.
+    if (NList.n_type & MachO::N_STAB)
+      continue;
+
+    // NO_SECT stays NO_SECT; anything else follows its section, and goes away
+    // with it if the section was not carried over.
+    if (NList.n_sect != MachO::NO_SECT) {
+      if (NList.n_sect >= OldToNewSectIdx.size() ||
+          !OldToNewSectIdx[NList.n_sect])
+        continue;
+      NList.n_sect = OldToNewSectIdx[NList.n_sect];
+    }
+
+    auto [It, Inserted] = StringOffsets.try_emplace(Name, NewStrings.size());
+    if (Inserted)
+      NewStrings.append(Name.begin(), Name.end()), NewStrings.push_back('\0');
+    NList.n_strx = It->second;
+
+    OldToNewSymIdx[OldIdx - 1] = NumSyms++;
+    if (Obj.isLittleEndian() != sys::IsLittleEndianHost)
+      MachO::swapStruct(NList);
+    NewSymtab.append(reinterpret_cast<char *>(&NList),
+                     reinterpret_cast<char *>(&NList) + sizeof(NList));
+  }
+  return NumSyms;
+}
+
+namespace {
+/// A Mach-O relocation entry kept as its two raw words, so that neither the
+/// bitfield layout nor byte order has to be reasoned about when copying one
+/// through from the input.
+struct RawRelocation {
+  uint32_t Address;
+  uint32_t Info;
+
+  bool isExtern() const { return (Info >> 27) & 1; }
+  uint32_t getSymbolNum() const { return Info & 0xffffff; }
+  void setSymbolNum(uint32_t Num) {
+    Info = (Info & ~0xffffffu) | (Num & 0xffffff);
+  }
+
+  static RawRelocation makeSectionRelative(uint32_t Offset, unsigned SectionIdx,
+                                           unsigned Size) {
+    // r_symbolnum:24, r_pcrel:1, r_length:2, r_extern:1, r_type:4. A relocation
+    // naming a section has r_extern clear, and *_RELOC_UNSIGNED is 0 on every
+    // Mach-O target.
+    uint32_t LengthLog2 = Size == 8 ? 3 : 2;
+    return {Offset, (SectionIdx & 0xffffffu) | (LengthLog2 << 25)};
+  }
+};
+
+/// A section of the object being written, either copied from the input or
+/// emitted by the DWARF streamer.
+struct OutputSection {
+  MachO::section_64 Header;
+  /// Content of a section copied from the input. Empty for a DWARF section.
+  StringRef InputContent;
+  /// The streamer's section, null for a section copied from the input.
+  MCSection *DwarfSection = nullptr;
+  std::vector<RawRelocation> Relocations;
+};
+} // namespace
+
+bool generateRelocatableObject(
+    llvm::IntrusiveRefCntPtr<llvm::vfs::FileSystem> VFS, const DebugMap &DM,
+    MCStreamer &MS, raw_fd_ostream &OutFile,
+    ArrayRef<DwarfRelocation> DwarfRelocs) {
+  auto &ObjectStreamer = static_cast<MCObjectStreamer &>(MS);
+  MCAssembler &MCAsm = ObjectStreamer.getAssembler();
+  auto &Writer = static_cast<MachObjectWriter &>(MCAsm.getWriter());
+
+  // Layout but don't emit.
+  MCAsm.layout();
+
+  if (!Writer.is64Bit())
+    return error("only 64-bit Mach-O is supported", "emitting relocatable "
+                                                    "object");
+
+  BinaryHolder InputBinaryHolder(VFS, false);
+  auto ObjectEntry = InputBinaryHolder.getObjectEntry(DM.getBinaryPath());
+  if (!ObjectEntry)
+    return error(Twine("opening ") + DM.getBinaryPath() + ": " +
+                     toString(ObjectEntry.takeError()),
+                 "emitting relocatable object");
+  auto Object =
+      ObjectEntry->getObjectAs<object::MachOObjectFile>(DM.getTriple());
+  if (!Object)
+    return error(Twine("opening ") + DM.getBinaryPath() + ": " +
+                     toString(Object.takeError()),
+                 "emitting relocatable object");
+  auto &InputBinary = *Object;
+
+  // Carry over the load commands that describe the object rather than its
+  // layout: platform, uuid, linker options. Anything pointing into __LINKEDIT
+  // would need its payload relocated too, so refuse rather than silently drop
+  // it.
+  SmallVector<StringRef, 4> PassThroughCommands;
+  unsigned PassThroughSize = 0;
+  for (auto &LCI : InputBinary.load_commands()) {
+    switch (LCI.C.cmd) {
+    case MachO::LC_SEGMENT:
+    case MachO::LC_SEGMENT_64:
+    case MachO::LC_SYMTAB:
+    case MachO::LC_DYSYMTAB:
+      continue;
+    case MachO::LC_DATA_IN_CODE:
+    case MachO::LC_LINKER_OPTIMIZATION_HINT:
+      if (InputBinary.getLinkeditDataLoadCommand(LCI).datasize)
+        return error(Twine("unsupported load command in ") + DM.getBinaryPath(),
+                     "emitting relocatable object");
+      continue;
+    default:
+      break;
+    }
+    PassThroughCommands.push_back(StringRef(LCI.Ptr, LCI.C.cmdsize));
+    PassThroughSize += LCI.C.cmdsize;
+  }
+
+  // Collect the sections to copy from the input. A relocatable object holds
+  // them all in a single segment. Any __DWARF left over from an earlier run is
+  // dropped in favour of the DWARF we just linked, which renumbers everything
+  // after it, so record where each section ended up. Index 0 is NO_SECT.
+  std::vector<OutputSection> Sections;
+  std::vector<uint32_t> OldToNewSectIdx(1, 0);
+  uint64_t NextAddress = 0;
+  for (auto &LCI : InputBinary.load_commands()) {
+    if (LCI.C.cmd != MachO::LC_SEGMENT_64)
+      continue;
+    MachO::segment_command_64 Seg = InputBinary.getSegment64LoadCommand(LCI);
+    for (unsigned I = 0; I != Seg.nsects; ++I) {
+      MachO::section_64 Sect = InputBinary.getSection64(LCI, I);
+      OldToNewSectIdx.push_back(0);
+      if (StringRef("__DWARF") ==
+          StringRef(Sect.segname, strnlen(Sect.segname, 16)))
+        continue;
+      OutputSection Out;
+      Out.Header = Sect;
+      if (Sect.offset)
+        Out.InputContent = InputBinary.getData().substr(Sect.offset, Sect.size);
+      const char *Relocs = InputBinary.getData().data() + Sect.reloff;
+      for (unsigned R = 0; R != Sect.nreloc; ++R) {
+        RawRelocation RI;
+        memcpy(&RI, Relocs + R * sizeof(RI), sizeof(RI));
+        Out.Relocations.push_back(RI);
+      }
+      NextAddress = std::max(NextAddress, Sect.addr + Sect.size);
+      OldToNewSectIdx.back() =
+          Sections.size() + 1; // Section numbers are 1-based.
+      Sections.push_back(std::move(Out));
+    }
+  }
+  const unsigned NumInputSections = Sections.size();
+
+  // Append the DWARF the streamer produced.
+  for (MCSection *Sec : Writer.getSectionOrder()) {
+    uint64_t Size = MCAsm.getSectionFileSize(*Sec);
+    if (!Size)
+      continue;
+    OutputSection Out;
+    memset(&Out.Header, 0, sizeof(Out.Header));
+    Out.DwarfSection = Sec;
+    Out.Header.size = Size;
+    Sections.push_back(std::move(Out));
+  }
+
+  // Turn the recorded DWARF relocations into section-based Mach-O relocations.
+  // Naming the section rather than a symbol keeps the addend in the field an
+  // address in this object, which is what a compiler emits and what makes an
+  // unrelocated read of the DWARF still meaningful.
+  auto SectionIndexForAddress = [&](uint64_t Addr) -> unsigned {
+    for (unsigned I = 0; I != NumInputSections; ++I) {
+      const MachO::section_64 &H = Sections[I].Header;
+      if (H.addr <= Addr && Addr < H.addr + H.size)
+        return I + 1; // Section numbers are 1-based.
+    }
+    return 0;
+  };
+  for (const DwarfRelocation &Reloc : DwarfRelocs) {
+    unsigned SectIdx = SectionIndexForAddress(Reloc.TargetAddress);
+    if (!SectIdx)
+      continue;
+    OutputSection *Target = nullptr;
+    for (unsigned I = NumInputSections, E = Sections.size(); I != E; ++I) {
+      auto *Sec = static_cast<MCSectionMachO *>(Sections[I].DwarfSection);
+      if (Sec->getName() == "__debug_info") {
+        Target = &Sections[I];
+        break;
+      }
+    }
+    if (!Target)
+      continue;
+    Target->Relocations.push_back(
+        RawRelocation::makeSectionRelative(Reloc.Offset, SectIdx, Reloc.Size));
+  }
+
+  // Transfer the symbol table and renumber the relocations that name it.
+  SmallString<0> NewSymtab;
+  SmallString<0> NewStrings;
+  std::vector<uint32_t> OldToNewSymIdx(InputBinary.getSymtabLoadCommand().nsyms,
+                                       UINT32_MAX);
+  unsigned NumSyms = transferObjectSymbols(InputBinary, NewSymtab, NewStrings,
+                                           OldToNewSectIdx, OldToNewSymIdx);
+  for (OutputSection &Sec : Sections)
+    for (RawRelocation &RI : Sec.Relocations) {
+      // r_symbolnum is a symbol index when r_extern is set and a section
+      // number otherwise; both were renumbered.
+      if (RI.isExtern()) {
+        if (RI.getSymbolNum() < OldToNewSymIdx.size())
+          RI.setSymbolNum(OldToNewSymIdx[RI.getSymbolNum()]);
+      } else if (RI.getSymbolNum() < OldToNewSectIdx.size()) {
+        RI.setSymbolNum(OldToNewSectIdx[RI.getSymbolNum()]);
+      }
+    }
+
+  // Lay the file out: header, load commands, section contents, relocation
+  // tables, then the symbol and string tables.
+  const unsigned HeaderSize = sizeof(MachO::mach_header_64);
+  const unsigned LoadCommandSize =
+      segmentLoadCommandSize(/*Is64Bit=*/true, Sections.size()) +
+      sizeof(MachO::symtab_command) + PassThroughSize;
+  const unsigned NumLoadCommands = 2 + PassThroughCommands.size();
+
+  uint64_t Offset = HeaderSize + LoadCommandSize;
+  uint64_t SectionDataStart = Offset;
+  for (OutputSection &Sec : Sections) {
+    if (Sec.DwarfSection) {
+      Align Alignment = Sec.DwarfSection->getAlign();
+      Offset = alignTo(Offset, Alignment);
+      NextAddress = alignTo(NextAddress, Alignment);
+      Sec.Header.addr = NextAddress;
+      Sec.Header.align = Log2(Alignment);
+      NextAddress += Sec.Header.size;
+    }
+    if (Sec.Header.size && !Sec.InputContent.empty()) {
+      Offset = alignTo(Offset, 1ull << Sec.Header.align);
+    } else if (Sec.DwarfSection) {
+      // Offset already aligned above.
+    }
+    if (Sec.DwarfSection || !Sec.InputContent.empty()) {
+      Sec.Header.offset = Offset;
+      Offset += Sec.Header.size;
+    } else {
+      Sec.Header.offset = 0; // Zero-fill section.
+    }
+  }
+  uint64_t SectionDataSize = Offset - SectionDataStart;
+
+  for (OutputSection &Sec : Sections) {
+    if (Sec.Relocations.empty()) {
+      Sec.Header.reloff = Sec.Header.nreloc = 0;
+      continue;
+    }
+    Sec.Header.reloff = Offset;
+    Sec.Header.nreloc = Sec.Relocations.size();
+    Offset += Sec.Relocations.size() * sizeof(MachO::relocation_info);
+  }
+
+  uint64_t SymtabStart = Offset;
+  uint64_t StringStart = SymtabStart + NumSyms * sizeof(MachO::nlist_64);
+
+  // Emit the file.
+  Writer.writeHeader(MachO::MH_OBJECT, NumLoadCommands, LoadCommandSize,
+                     InputBinary.getHeader64().flags &
+                         MachO::MH_SUBSECTIONS_VIA_SYMBOLS);
+  Writer.writeSegmentLoadCommand("", Sections.size(), /*VMAddr=*/0,
+                                 /*VMSize=*/NextAddress, SectionDataStart,
+                                 SectionDataSize, /*MaxProt=*/7,
+                                 /*InitProt=*/7);
+  for (OutputSection &Sec : Sections) {
+    if (Sec.DwarfSection) {
+      Writer.writeSection(MCAsm,
+                          *static_cast<MCSectionMachO *>(Sec.DwarfSection),
+                          Sec.Header.addr, Sec.Header.offset, /*Flags=*/0,
+                          Sec.Header.reloff, Sec.Header.nreloc);
+      continue;
+    }
+    MachO::section_64 H = Sec.Header;
+    if (InputBinary.isLittleEndian() != sys::IsLittleEndianHost)
+      MachO::swapStruct(H);
+    OutFile.write(reinterpret_cast<const char *>(&H), sizeof(H));
+  }
+  Writer.writeSymtabLoadCommand(SymtabStart, NumSyms, StringStart,
+                                NewStrings.size());
+  for (StringRef Cmd : PassThroughCommands)
+    OutFile.write(Cmd.data(), Cmd.size());
+
+  assert(OutFile.tell() == HeaderSize + LoadCommandSize);
+
+  for (OutputSection &Sec : Sections) {
+    if (!Sec.Header.offset)
+      continue;
+    OutFile.write_zeros(Sec.Header.offset - OutFile.tell());
+    if (Sec.DwarfSection)
+      MCAsm.writeSectionData(OutFile, Sec.DwarfSection);
+    else
+      OutFile.write(Sec.InputContent.data(), Sec.InputContent.size());
+  }
+
+  for (OutputSection &Sec : Sections) {
+    if (Sec.Relocations.empty())
+      continue;
+    assert(OutFile.tell() == Sec.Header.reloff);
+    for (const RawRelocation &RI : Sec.Relocations) {
+      Writer.W.write<uint32_t>(RI.Address);
+      Writer.W.write<uint32_t>(RI.Info);
+    }
+  }
+
+  assert(OutFile.tell() == SymtabStart);
+  OutFile << NewSymtab.str();
+  assert(OutFile.tell() == StringStart);
+  OutFile << NewStrings.str();
+
+  return true;
+}
 } // namespace MachOUtils
 } // namespace dsymutil
 } // namespace llvm

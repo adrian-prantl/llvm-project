@@ -1,0 +1,12 @@
+# _g_other is deliberately absent: a symbol the linker did not keep has no
+# debug map entry, and the DIE describing it must not survive either.
+---
+triple:          'x86_64-apple-darwin'
+binary-path:     '@OBJ@'
+objects:
+  - filename: '@OBJ@'
+    symbols:
+      - { sym: _g_func, objAddr: 0x0,  binAddr: 0x0,  size: 0x30 }
+      - { sym: _g_var,  objAddr: 0x40, binAddr: 0x40, size: 0x10 }
+      - { sym: _s_var,  objAddr: 0x50, binAddr: 0x50, size: 0x4 }
+...

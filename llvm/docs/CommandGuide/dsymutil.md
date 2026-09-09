@@ -75,6 +75,13 @@ If the source is a directory, its contents are copied recursively. This option
 can be specified multiple times.
 :::
 
+:::{option} --emit-relocatable
+Emit a relocatable object file containing the linked DWARF and the relocations
+needed to resolve its addresses, instead of a dSYM companion file. The result
+stands in for the object files named by the input's debug map, so the debug
+info stays usable in a build that no longer has them. Implies `--flat`.
+:::
+
 :::{option} --fat64
 Use a 64-bit header when emitting universal binaries.
 :::
