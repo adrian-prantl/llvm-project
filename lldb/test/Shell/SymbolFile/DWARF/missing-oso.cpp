@@ -2,7 +2,7 @@
 // instead of silently dropping the debug info for that object file.
 // REQUIRES: system-darwin
 // RUN: %clang_host %s -g -c -o %t.o
-// RUN: %clang_host %t.o -g -o %t
+// RUN: %link %t.o -g -o %t
 // RUN: rm %t.o
 // RUN: %lldb %t -o "breakpoint set -f %s -l 10" -o exit 2>&1 | FileCheck %s
 
