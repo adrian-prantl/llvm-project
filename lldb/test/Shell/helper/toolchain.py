@@ -1,7 +1,9 @@
 import os
+import importlib.util
 import itertools
 import platform
 import re
+import shlex
 import subprocess
 import sys
 
@@ -14,6 +16,28 @@ from lit.llvm.subst import ToolSubst
 import lldbflakes
 
 import posixpath
+
+
+def _get_codesign_command(config, triple):
+    """Returns the CODESIGN command that Makefile.rules would receive for
+    binaries built for the given triple, or None if they aren't signed."""
+    if platform.system() != "Darwin" or "-apple-" not in triple:
+        return None
+    # Load the module by path, importing lldbsuite.test would pull in dotest.
+    path = os.path.join(
+        config.lldb_src_root,
+        "packages",
+        "Python",
+        "lldbsuite",
+        "test",
+        "builders",
+        "codesign.py",
+    )
+    spec = importlib.util.spec_from_file_location("lldbsuite_codesign", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.get_codesign_command(triple)
+
 
 def _get_lldb_init_path(config):
     return os.path.join(config.test_exec_root, "lit-lldb-init-quiet")
@@ -214,10 +238,8 @@ def use_support_substitutions(config):
     # Set up substitutions for support tools.  These tools can be overridden at the CMake
     # level (by specifying -DLLDB_LIT_TOOLS_DIR), installed, or as a last resort, we can use
     # the just-built version.
-    if config.enable_remote:
-        host_flags = ["--target=" + config.target_triple]
-    else:
-        host_flags = ["--target=" + config.host_triple]
+    host_triple = config.target_triple if config.enable_remote else config.host_triple
+    host_flags = ["--target=" + host_triple]
     if platform.system() in ["Darwin"]:
         try:
             out = subprocess.check_output(["xcrun", "--show-sdk-path"]).strip()
@@ -267,6 +289,21 @@ def use_support_substitutions(config):
     host_flags = " ".join(host_flags)
     config.substitutions.append(("%clang_host", "%clang " + host_flags))
     config.substitutions.append(("%clangxx_host", "%clangxx " + host_flags))
+
+    # %link and %linkxx behave like %clang_host and %clangxx_host, but also
+    # codesign the output the same way Makefile.rules does for API tests. Use
+    # them to build binaries that lldb launches or attaches to.
+    link_wrapper = ""
+    if codesign := _get_codesign_command(config, host_triple):
+        wrapper = os.path.join(os.path.dirname(__file__), "codesign_wrapper.py")
+        link_wrapper = "{} {} --codesign {} -- ".format(
+            shlex.quote(config.python_executable),
+            shlex.quote(wrapper),
+            shlex.quote(codesign),
+        )
+    # %linkxx must come first, otherwise %link would match its prefix.
+    config.substitutions.append(("%linkxx", link_wrapper + "%clangxx " + host_flags))
+    config.substitutions.append(("%link", link_wrapper + "%clang " + host_flags))
     config.substitutions.append(
         ("%clang_cl_host", "%clang_cl --target=" + config.host_triple)
     )

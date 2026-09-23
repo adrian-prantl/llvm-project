@@ -1,25 +1,10 @@
-import re
 import os
 import subprocess
 
 from .builder import Builder
+from .codesign import get_codesign_command
 from lldbsuite.test import configuration
 import lldbsuite.test.lldbutil as lldbutil
-
-TRIPLE_RE = re.compile(
-    r"""^(?P<arch>[a-zA-Z0-9_]+) # arch (required)
-        (?:-(?P<vendor>[a-zA-Z0-9_]+))? # vendor (optional)
-        (?:-(?P<os>[a-zA-Z_]+)(?P<os_version>[\d.]+)?)? # os + version (optional)
-        (?:-(?P<env>[a-zA-Z0-9_]+))? # env/abi (optional)
-        $""",
-    re.X,
-)
-
-
-def split_triple(triple):
-    if m := TRIPLE_RE.match(triple):
-        return m.groups()
-    return [None] * TRIPLE_RE.groups
 
 
 class BuilderDarwin(Builder):
@@ -42,19 +27,7 @@ class BuilderDarwin(Builder):
                 args["FRAMEWORK_INCLUDES"] = "-F{}".format(private_frameworks)
 
         if triple := self.getTriple():
-            _, _, operating_system, _, env = split_triple(triple)
-
-            builder_dir = os.path.dirname(os.path.abspath(__file__))
-            test_dir = os.path.dirname(builder_dir)
-            if operating_system in [None, "darwin", "macos", "macosx"]:
-                entitlements_file = "entitlements-macos.plist"
-            else:
-                if env == "simulator":
-                    entitlements_file = "entitlements-simulator.plist"
-                else:
-                    entitlements_file = "entitlements.plist"
-            entitlements = os.path.join(test_dir, "make", entitlements_file)
-            args["CODESIGN"] = "codesign --entitlements {}".format(entitlements)
+            args["CODESIGN"] = get_codesign_command(triple)
 
         # Return extra args as a formatted string.
         return ["{}={}".format(key, value) for key, value in args.items()]
