@@ -9,22 +9,23 @@ class TestCase(TestBase):
 
     @requireNotEmbeddedSwift
     @swiftTest
-    def test_print_task_group(self):
-        """Print a TaskGroup and verify its children."""
+    def test(self):
+        """Verify the children of a TaskGroup and a ThrowingTaskGroup."""
         self.build()
-        lldbutil.run_to_source_breakpoint(
-            self, "break here TaskGroup", lldb.SBFileSpec("main.swift")
+        src = lldb.SBFileSpec("main.swift")
+        target, process, thread, bkpt = lldbutil.run_to_source_breakpoint(
+            self, "break here TaskGroup", src
         )
+        target.BreakpointDelete(bkpt.GetID())
+        self.do_test_api(thread)
         self.do_test_print()
 
-    @requireNotEmbeddedSwift
-    @swiftTest
-    def test_print_throwing_task_group(self):
-        """Print a ThrowingTaskGroup and verify its children."""
-        self.build()
-        lldbutil.run_to_source_breakpoint(
-            self, "break here ThrowingTaskGroup", lldb.SBFileSpec("main.swift")
+        # Awaiting the first group may resume on a different thread.
+        threads = lldbutil.continue_to_source_breakpoint(
+            self, process, "break here ThrowingTaskGroup", src
         )
+        self.assertEqual(len(threads), 1)
+        self.do_test_api(threads[0])
         self.do_test_print()
 
     def do_test_print(self):
@@ -61,28 +62,7 @@ class TestCase(TestBase):
             ],
         )
 
-    @requireNotEmbeddedSwift
-    @swiftTest
-    def test_api_task_group(self):
-        """Verify a TaskGroup contains its expected children."""
-        self.build()
-        _, process, _, _ = lldbutil.run_to_source_breakpoint(
-            self, "break here TaskGroup", lldb.SBFileSpec("main.swift")
-        )
-        self.do_test_api(process)
-
-    @requireNotEmbeddedSwift
-    @swiftTest
-    def test_api_throwing_task_group(self):
-        """Verify a ThrowingTaskGroup contains its expected children."""
-        self.build()
-        _, process, _, _ = lldbutil.run_to_source_breakpoint(
-            self, "break here ThrowingTaskGroup", lldb.SBFileSpec("main.swift")
-        )
-        self.do_test_api(process)
-
-    def do_test_api(self, process):
-        thread = process.GetSelectedThread()
+    def do_test_api(self, thread):
         frame = thread.GetSelectedFrame()
         group = frame.FindVariable("group")
         self.assertEqual(group.num_children, 3)
