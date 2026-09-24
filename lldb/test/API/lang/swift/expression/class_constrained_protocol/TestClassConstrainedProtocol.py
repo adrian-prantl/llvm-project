@@ -16,31 +16,28 @@ from lldbsuite.test.decorators import *
 class TestClassConstrainedProtocol(TestBase):
     @requireNotEmbeddedSwift
     @swiftTest
-    def test_extension_weak_self(self):
-        """Test that we can reconstruct weak self captured in a class constrained protocol."""
+    def test(self):
+        """Test that we can reconstruct self and weak self captured in a
+        closure, both in a method of a class conforming to a class constrained
+        protocol and in a method of the protocol's extension."""
         self.build()
-        self.do_self_test("Break here for weak self", needs_dynamic=False)
-
-    @requireNotEmbeddedSwift
-    @swiftTest
-    def test_extension_self (self):
-        """Test that we can reconstruct self in method of a class constrained protocol."""
-        self.build()
-        self.do_self_test("Break here in class protocol", needs_dynamic=False)
-
-    @requireNotEmbeddedSwift
-    @swiftTest
-    def test_method_weak_self(self):
-        """Test that we can reconstruct weak self capture in method of a class conforming to a class constrained protocol."""
-        self.build()
-        self.do_self_test("Break here for method weak self", needs_dynamic=False)
-
-    @requireNotEmbeddedSwift
-    @swiftTest
-    def test_method_self(self):
-        """Test that we can reconstruct self in method of a class conforming to a class constrained protocol."""
-        self.build()
-        self.do_self_test("Break here in method", needs_dynamic=False)
+        src = lldb.SBFileSpec("main.swift")
+        # main.swift reaches these in order.
+        target, process, _, bkpt = lldbutil.run_to_source_breakpoint(
+            self, "Break here in method", src
+        )
+        target.BreakpointDelete(bkpt.GetID())
+        self.check_self("Break here in method", needs_dynamic=False)
+        for bkpt_pattern in [
+            "Break here for method weak self",
+            "Break here in class protocol",
+            "Break here for weak self",
+        ]:
+            threads = lldbutil.continue_to_source_breakpoint(
+                self, process, bkpt_pattern, src
+            )
+            self.assertEqual(len(threads), 1, f"no stop at {bkpt_pattern}")
+            self.check_self(bkpt_pattern, needs_dynamic=False)
 
     def setUp(self):
         # Call super's setUp().
@@ -65,8 +62,3 @@ class TestClassConstrainedProtocol(TestBase):
 
         self.assertTrue(f_ivar.GetValueAsSigned() == 12345,
                         "Wrong value for f: %d"%(f_ivar.GetValueAsSigned()))
-
-    def do_self_test(self, bkpt_pattern, needs_dynamic):
-        lldbutil.run_to_source_breakpoint(
-            self, bkpt_pattern, lldb.SBFileSpec('main.swift'))
-        self.check_self(bkpt_pattern, needs_dynamic)
