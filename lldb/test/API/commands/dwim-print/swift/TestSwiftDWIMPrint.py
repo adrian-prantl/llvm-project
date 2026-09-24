@@ -10,35 +10,21 @@ import lldbsuite.test.lldbutil as lldbutil
 class TestCase(TestBase):
     @requireNotEmbeddedSwift
     @swiftTest
-    def test_swift_po_address(self):
+    def test(self):
         self.build()
         _, _, thread, _ = lldbutil.run_to_source_breakpoint(
             self, "// break here", lldb.SBFileSpec("main.swift")
         )
+
+        # Ensure that objects are printed without a name, and without the '='
+        # that would follow the name.
+        self.expect(f"dwim-print user", patterns=[r"^\(a\.User\) 0x[0-9a-f]{7,} \{"])
+
         frame = thread.frame[0]
         addr = frame.FindVariable("object").GetLoadAddress()
         hex_addr = f"{addr:x}"
         self.expect(f"dwim-print -O -- 0x{hex_addr}", patterns=[f"Object@0x0*{hex_addr}"])
         self.expect(f"dwim-print -O -- {addr}", patterns=[f"Object@0x0*{hex_addr}"])
 
-    @requireNotEmbeddedSwift
-    @swiftTest
-    def test_swift_po_non_address_hex(self):
-        """No special handling of non-memory integer values."""
-        self.build()
-        lldbutil.run_to_source_breakpoint(
-            self, "// break here", lldb.SBFileSpec("main.swift")
-        )
+        # No special handling of non-memory integer values.
         self.expect(f"dwim-print -O -- 0x1000", substrs=["4096"])
-
-    @requireNotEmbeddedSwift
-    @swiftTest
-    def test_print_swift_object_does_not_show_name(self):
-        """Ensure that objects are printed without a name, and without the '='
-        that would follow the name."""
-        self.build()
-        lldbutil.run_to_source_breakpoint(
-            self, "// break here", lldb.SBFileSpec("main.swift")
-        )
-
-        self.expect(f"dwim-print user", patterns=[r"^\(a\.User\) 0x[0-9a-f]{7,} \{"])
