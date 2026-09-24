@@ -15,17 +15,23 @@ class TestCase(TestBase):
     @skipUnlessFoundationEssentials
     @skipIfLinux  # https://github.com/swiftlang/llvm-project/issues/13465
     @swiftTest
-    def test_swift_string_index_formatters_native(self):
-        """Test String.Index summary strings for a native (non-bridged) String."""
+    def test(self):
+        """Test String.Index summary strings for native and bridged Strings."""
         self.build()
-        lldbutil.run_to_source_breakpoint(
+        _, process, _, bkpt = lldbutil.run_to_source_breakpoint(
             self, "break here", lldb.SBFileSpec("main.swift")
         )
+        # The first breakpoint stop is a native (non-bridged) String.
+        self.check_native()
 
-        #
-        # The first breakpoint stop tests a native (non-bridged) String.
-        #
+        # The second breakpoint stop is a bridged String, which needs the
+        # Objective-C Foundation.
+        if self.platformIsDarwin():
+            threads = lldbutil.continue_to_breakpoint(process, bkpt)
+            self.assertEqual(len(threads), 1)
+            self.check_bridged()
 
+    def check_native(self):
         self.expect(
             "v nativeIndices",
             substrs=[
@@ -77,22 +83,7 @@ class TestCase(TestBase):
             ],
         )
 
-    @requireNotEmbeddedSwift
-    @skipUnlessFoundation
-    @swiftTest
-    def test_swift_string_index_formatters_bridged(self):
-        """Test String.Index summary strings for a bridged String."""
-        self.build()
-        _, process, _, _ = lldbutil.run_to_source_breakpoint(
-            self, "break here", lldb.SBFileSpec("main.swift")
-        )
-
-        #
-        # The second breakpoint stop tests a bridged String.
-        #
-
-        process.Continue()
-
+    def check_bridged(self):
         self.expect(
             "v nativeIndices",
             substrs=[
