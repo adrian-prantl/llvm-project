@@ -4811,6 +4811,18 @@ llvm::Error SwiftASTContext::LoadModule(swift::ModuleDecl &swift_module,
                                         Process &process) {
   VALID_OR_RETURN(llvm::createStringError("invalid context"));
 
+  // An Embedded Swift program statically links its own runtime. A module's
+  // link libraries are the dynamic Swift runtime and overlays, which are not
+  // ABI-compatible with it, and once loaded into the process they would
+  // satisfy symbol lookups for expressions.
+  if (process.GetTarget().IsEmbeddedSwift()) {
+    LOG_PRINTF(GetLog(LLDBLog::Types | LLDBLog::Expressions),
+               "Not loading link libraries of module \"%s\" into an Embedded "
+               "Swift process.",
+               swift_module.getName().str().str().c_str());
+    return llvm::Error::success();
+  }
+
   Status current_error;
   auto addLinkLibrary = [&](swift::LinkLibrary link_lib) {
     Status load_image_error;
