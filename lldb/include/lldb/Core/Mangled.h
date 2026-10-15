@@ -43,7 +43,6 @@ public:
 
   enum ManglingScheme : uint8_t {
     eManglingSchemeNone = 0,
-    eManglingSchemeSwift,
     /// The first of the schemes that language plugins register with
     /// RegisterManglingScheme().
     eFirstRegisteredManglingScheme,
