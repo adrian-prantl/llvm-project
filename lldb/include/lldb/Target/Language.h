@@ -14,6 +14,7 @@
 #include <memory>
 #include <optional>
 #include <set>
+#include <string>
 #include <vector>
 
 #include "lldb/Core/FormatEntity.h"
@@ -333,6 +334,26 @@ public:
   /// Returns true if this language handles the names mangled with \p scheme.
   virtual bool HandlesManglingScheme(Mangled::ManglingScheme scheme) const {
     return false;
+  }
+
+  /// How to demangle a name in DemangleSymbol().
+  struct DemangleOptions {
+    /// Whether to compute the \c DemangledNameInfo too.
+    bool want_info = false;
+  };
+
+  /// A demangled name and, if requested, where its parts begin and end.
+  struct DemangledName {
+    /// Empty if the name couldn't be demangled.
+    std::string name;
+    std::optional<DemangledNameInfo> info;
+  };
+
+  /// Demangle \p mangled, a name mangled with a scheme that this language
+  /// handles.
+  virtual DemangledName DemangleSymbol(ConstString mangled,
+                                       const DemangleOptions &options) const {
+    return {};
   }
 
   /// Parses mangled function names for the symbol table's name indexes.
