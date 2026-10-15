@@ -117,6 +117,30 @@ TEST(MangledTest, SameForInvalidDLangPrefixedName) {
   EXPECT_STREQ("_DDD", the_demangled.GetCString());
 }
 
+TEST(MangledTest, RegisterManglingScheme) {
+  Mangled::ManglingScheme scheme = Mangled::RegisterManglingScheme(
+      {"$test1_", "$test2_"}, eLanguageTypeAda83);
+  ASSERT_NE(scheme, Mangled::eManglingSchemeNone);
+  EXPECT_EQ(Mangled::GetManglingScheme("$test1_foo"), scheme);
+  EXPECT_EQ(Mangled::GetManglingScheme("$test2_foo"), scheme);
+  EXPECT_EQ(Mangled::GetManglingScheme("$test3_foo"),
+            Mangled::eManglingSchemeNone);
+  EXPECT_EQ(Mangled::GetLanguageForManglingScheme(scheme), eLanguageTypeAda83);
+  EXPECT_EQ(Mangled("$test1_foo").GetMangledName(), ConstString("$test1_foo"));
+
+  // Registering the scheme again, as a plugin that is initialized again would,
+  // returns the same scheme.
+  EXPECT_EQ(Mangled::RegisterManglingScheme({"$test1_", "$test2_"},
+                                            eLanguageTypeAda83),
+            scheme);
+
+  Mangled::UnregisterManglingScheme(scheme);
+  EXPECT_EQ(Mangled::GetManglingScheme("$test1_foo"),
+            Mangled::eManglingSchemeNone);
+  EXPECT_EQ(Mangled("$test1_foo").GetDemangledName(),
+            ConstString("$test1_foo"));
+}
+
 TEST(MangledTest, RecognizeSwiftMangledNames) {
   llvm::StringRef valid_swift_mangled_names[] = {
       "_TtC4main7MyClass",   // Mangled objc class name

@@ -61,12 +61,28 @@ using namespace lldb_private::formatters;
 
 LLDB_PLUGIN_DEFINE(CPlusPlusLanguage)
 
+/// The mangling schemes that this plugin registered.
+static Mangled::ManglingScheme g_itanium_scheme = Mangled::eManglingSchemeNone;
+static Mangled::ManglingScheme g_msvc_scheme = Mangled::eManglingSchemeNone;
+
+static bool IsCPlusPlusManglingScheme(Mangled::ManglingScheme scheme) {
+  return scheme != Mangled::eManglingSchemeNone &&
+         (scheme == g_itanium_scheme || scheme == g_msvc_scheme);
+}
+
 void CPlusPlusLanguage::Initialize() {
   PluginManager::RegisterPlugin(GetPluginNameStatic(), "C++ Language",
                                 CreateInstance, &DebuggerInitialize);
+  // "___Z" is a clang extension for block invocations.
+  g_itanium_scheme =
+      Mangled::RegisterManglingScheme({"_Z", "___Z"}, eLanguageTypeC_plus_plus);
+  g_msvc_scheme =
+      Mangled::RegisterManglingScheme({"?"}, eLanguageTypeC_plus_plus);
 }
 
 void CPlusPlusLanguage::Terminate() {
+  Mangled::UnregisterManglingScheme(g_msvc_scheme);
+  Mangled::UnregisterManglingScheme(g_itanium_scheme);
   PluginManager::UnregisterPlugin(CreateInstance);
 }
 
@@ -109,15 +125,8 @@ CPlusPlusLanguage::GetFunctionNameInfo(ConstString name) const {
 }
 
 bool CPlusPlusLanguage::SymbolNameFitsToLanguage(const Mangled &mangled) const {
-  auto mangling_scheme =
-      Mangled::GetManglingScheme(mangled.GetMangledName().GetStringRef());
-  return HandlesManglingScheme(mangling_scheme);
-}
-
-bool CPlusPlusLanguage::HandlesManglingScheme(
-    Mangled::ManglingScheme scheme) const {
-  return scheme == Mangled::eManglingSchemeItanium ||
-         scheme == Mangled::eManglingSchemeMSVC;
+  return IsCPlusPlusManglingScheme(
+      Mangled::GetManglingScheme(mangled.GetMangledName().GetStringRef()));
 }
 
 static char *GetMSVCDemangledStr(llvm::StringRef M) {
@@ -179,8 +188,9 @@ Language::DemangledName
 CPlusPlusLanguage::DemangleSymbol(ConstString mangled,
                                   const DemangleOptions &options) const {
   DemangledName demangled;
-  switch (Mangled::GetManglingScheme(mangled.GetStringRef())) {
-  case Mangled::eManglingSchemeItanium: {
+  Mangled::ManglingScheme scheme =
+      Mangled::GetManglingScheme(mangled.GetStringRef());
+  if (scheme == g_itanium_scheme) {
     auto [demangled_cstr, info] = GetItaniumDemangledStr(mangled.GetCString());
     if (demangled_cstr) {
       demangled.name = demangled_cstr;
@@ -188,16 +198,11 @@ CPlusPlusLanguage::DemangleSymbol(ConstString mangled,
     }
     if (options.want_info)
       demangled.info = std::move(info);
-    break;
-  }
-  case Mangled::eManglingSchemeMSVC:
+  } else if (scheme == g_msvc_scheme) {
     if (char *demangled_cstr = GetMSVCDemangledStr(mangled.GetStringRef())) {
       demangled.name = demangled_cstr;
       std::free(demangled_cstr);
     }
-    break;
-  default:
-    break;
   }
   return demangled;
 }
@@ -274,10 +279,10 @@ private:
 std::unique_ptr<Language::MangledNameParser>
 CPlusPlusLanguage::CreateMangledNameParser(
     Mangled::ManglingScheme scheme) const {
-  if (!HandlesManglingScheme(scheme))
+  if (!IsCPlusPlusManglingScheme(scheme))
     return nullptr;
-  return std::make_unique<CPlusPlusMangledNameParser>(
-      scheme == Mangled::eManglingSchemeItanium);
+  return std::make_unique<CPlusPlusMangledNameParser>(scheme ==
+                                                      g_itanium_scheme);
 }
 
 ConstString CPlusPlusLanguage::GetDemangledFunctionNameWithoutArguments(
