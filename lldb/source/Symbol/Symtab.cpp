@@ -6,12 +6,12 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include <array>
 #include <map>
 #include <set>
 
 #include "lldb/Core/DataFileCache.h"
 #include "lldb/Core/Module.h"
-#include "lldb/Core/RichManglingContext.h"
 #include "lldb/Core/Section.h"
 #include "lldb/Symbol/ObjectFile.h"
 #include "lldb/Symbol/Symbol.h"
@@ -238,43 +238,6 @@ const Symbol *Symtab::SymbolAtIndex(size_t idx) const {
   return nullptr;
 }
 
-static bool lldb_skip_name(llvm::StringRef mangled,
-                           Mangled::ManglingScheme scheme) {
-  switch (scheme) {
-  case Mangled::eManglingSchemeItanium: {
-    if (mangled.size() < 3 || !mangled.starts_with("_Z"))
-      return true;
-
-    // Avoid the following types of symbols in the index.
-    switch (mangled[2]) {
-    case 'G': // guard variables
-    case 'T': // virtual tables, VTT structures, typeinfo structures + names
-    case 'Z': // named local entities (if we eventually handle
-              // eSymbolTypeData, we will want this back)
-      return true;
-
-    default:
-      break;
-    }
-
-    // Include this name in the index.
-    return false;
-  }
-
-  // No filters for this scheme yet. Include all names in indexing.
-  case Mangled::eManglingSchemeMSVC:
-  case Mangled::eManglingSchemeRustV0:
-  case Mangled::eManglingSchemeD:
-  case Mangled::eManglingSchemeSwift:
-    return false;
-
-  // Don't try and demangle things we can't categorize.
-  case Mangled::eManglingSchemeNone:
-    return true;
-  }
-  llvm_unreachable("unknown scheme!");
-}
-
 void Symtab::InitNameIndexes() {
   // Protected function, no need to lock mutex...
   if (m_name_indexes_computed)
@@ -308,9 +271,16 @@ void Symtab::InitNameIndexes() {
   std::vector<std::pair<NameToIndexMap::Entry, const char *>> backlog;
   backlog.reserve(num_symbols / 2);
 
-  // Instantiation of the demangler is expensive, so better use a single one
-  // for all entries during batch processing.
-  RichManglingContext rmc;
+  // A single parser per mangling scheme handles all of its names, so that it
+  // can reuse its demangler. A nullptr means no language parses the scheme.
+  std::array<std::unique_ptr<Language::MangledNameParser>,
+             Mangled::kNumManglingSchemes>
+      parsers;
+  for (size_t i = 0; i < parsers.size(); ++i) {
+    auto scheme = static_cast<Mangled::ManglingScheme>(i);
+    if (Language *lang = Language::FindPluginForManglingScheme(scheme))
+      parsers[i] = lang->CreateMangledNameParser(scheme);
+  }
   for (size_t value = 0; value < num_symbols; ++value) {
     Symbol *symbol = &m_symbols[value];
 
@@ -339,9 +309,14 @@ void Symtab::InitNameIndexes() {
 
       const SymbolType type = symbol->GetType();
       if (type == eSymbolTypeCode || type == eSymbolTypeResolver) {
-        if (mangled.GetRichManglingInfo(rmc, lldb_skip_name)) {
-          RegisterMangledNameEntry(value, class_contexts, backlog, rmc);
-          continue;
+        if (Language::MangledNameParser *parser =
+                parsers[Mangled::GetManglingScheme(name.GetStringRef())]
+                    .get()) {
+          if (std::optional<Mangled::FunctionNameParts> parts =
+                  parser->Parse(mangled)) {
+            RegisterMangledNameEntry(value, *parts, class_contexts, backlog);
+            continue;
+          }
         }
       }
     }
@@ -390,23 +365,23 @@ void Symtab::InitNameIndexes() {
 }
 
 void Symtab::RegisterMangledNameEntry(
-    uint32_t value, std::set<const char *> &class_contexts,
-    std::vector<std::pair<NameToIndexMap::Entry, const char *>> &backlog,
-    RichManglingContext &rmc) {
+    uint32_t value, const Mangled::FunctionNameParts &parts,
+    std::set<const char *> &class_contexts,
+    std::vector<std::pair<NameToIndexMap::Entry, const char *>> &backlog) {
   // Only register functions that have a base name.
-  llvm::StringRef base_name = rmc.ParseFunctionBaseName();
-  if (base_name.empty())
+  if (!parts.basename)
     return;
 
   // The base name will be our entry's name.
-  NameToIndexMap::Entry entry(ConstString(base_name), value);
-  llvm::StringRef decl_context = rmc.ParseFunctionDeclContextName();
+  NameToIndexMap::Entry entry(parts.basename, value);
 
-  // Register functions with no context.
-  if (decl_context.empty()) {
+  auto &basename_to_index =
+      GetNameToSymbolIndexMap(lldb::eFunctionNameTypeBase);
+  auto &method_to_index =
+      GetNameToSymbolIndexMap(lldb::eFunctionNameTypeMethod);
+  switch (parts.kind) {
+  case Mangled::FunctionNameKind::TopLevel: {
     // This has to be a basename
-    auto &basename_to_index =
-        GetNameToSymbolIndexMap(lldb::eFunctionNameTypeBase);
     basename_to_index.Append(entry);
     // If there is no context (no namespaces or class scopes that come before
     // the function name) then this also could be a fullname.
@@ -415,31 +390,37 @@ void Symtab::RegisterMangledNameEntry(
     return;
   }
 
-  // Make sure we have a pool-string pointer and see if we already know the
-  // context name.
-  const char *decl_context_ccstr = ConstString(decl_context).GetCString();
-  auto it = class_contexts.find(decl_context_ccstr);
+  case Mangled::FunctionNameKind::Function:
+    basename_to_index.Append(entry);
+    return;
 
-  auto &method_to_index =
-      GetNameToSymbolIndexMap(lldb::eFunctionNameTypeMethod);
+  case Mangled::FunctionNameKind::Method:
+    method_to_index.Append(entry);
+    return;
+
   // Register constructors and destructors. They are methods and create
   // declaration contexts.
-  if (rmc.IsCtorOrDtor()) {
+  case Mangled::FunctionNameKind::ConstructorOrDestructor:
     method_to_index.Append(entry);
-    if (it == class_contexts.end())
-      class_contexts.insert(it, decl_context_ccstr);
+    class_contexts.insert(parts.decl_context.GetCString());
+    return;
+
+  case Mangled::FunctionNameKind::Unknown: {
+    const char *decl_context_ccstr = parts.decl_context.GetCString();
+
+    // Register regular methods with a known declaration context.
+    if (class_contexts.count(decl_context_ccstr)) {
+      method_to_index.Append(entry);
+      return;
+    }
+
+    // Regular methods in unknown declaration contexts are put to the backlog.
+    // We will revisit them once we processed all remaining symbols.
+    backlog.push_back(std::make_pair(entry, decl_context_ccstr));
     return;
   }
-
-  // Register regular methods with a known declaration context.
-  if (it != class_contexts.end()) {
-    method_to_index.Append(entry);
-    return;
   }
-
-  // Regular methods in unknown declaration contexts are put to the backlog. We
-  // will revisit them once we processed all remaining symbols.
-  backlog.push_back(std::make_pair(entry, decl_context_ccstr));
+  llvm_unreachable("unknown function name kind");
 }
 
 void Symtab::RegisterBacklogEntry(
